@@ -1,0 +1,25 @@
+# mac
+.DS_Store
+
+# git folder
+.git
+
+# npm
+node_modules
+npm-debug.log
+
+# cache
+.cache
+
+# personal
+.env
+config.js
+docker-compose.yml
+docker-push.sh
+data
+rec
+rtmp
+rnnoiseBuild
+
+# virtual background
+custom
