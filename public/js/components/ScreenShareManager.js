@@ -471,9 +471,7 @@ class ScreenShareManager {
      * Unregisters socket listeners related to screen sharing.
      */
     close() {
-        if (this.socket) {
-            this.socket.off('setVideoOff');
-        }
+        // Socket event listener for setVideoOff is managed by RoomClient.js
         this.rc = null;
         this.socket = null;
     }

@@ -90,15 +90,18 @@ class EditorManager {
     // ####################################################
 
     _bindSocketEvents() {
-        this.socket.on('editorChange', (data) => {
+        this._onEditorChange = (data) => {
             this.handleEditorData(data);
-        });
-        this.socket.on('editorActions', (data) => {
+        };
+        this._onEditorActions = (data) => {
             this.handleEditorActionsData(data);
-        });
-        this.socket.on('editorUpdate', (data) => {
+        };
+        this._onEditorUpdate = (data) => {
             this.handleEditorUpdateData(data);
-        });
+        };
+        this.socket.on('editorChange', this._onEditorChange);
+        this.socket.on('editorActions', this._onEditorActions);
+        this.socket.on('editorUpdate', this._onEditorUpdate);
     }
 
     // ####################################################
@@ -423,9 +426,9 @@ class EditorManager {
 
     close() {
         if (this.socket) {
-            this.socket.off('editorChange');
-            this.socket.off('editorActions');
-            this.socket.off('editorUpdate');
+            this.socket.off('editorChange', this._onEditorChange);
+            this.socket.off('editorActions', this._onEditorActions);
+            this.socket.off('editorUpdate', this._onEditorUpdate);
         }
         if (this.isEditorPinned) {
             this.editorUnpin();

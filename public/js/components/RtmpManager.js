@@ -384,12 +384,8 @@ class RtmpManager {
             this.stopRTMPfromURL();
         }
 
-        if (this.socket) {
-            this.socket.off('endRTMP');
-            this.socket.off('errorRTMP');
-            this.socket.off('endRTMPfromURL');
-            this.socket.off('errorRTMPfromURL');
-        }
+        // Socket event listeners for endRTMP, errorRTMP, endRTMPfromURL,
+        // and errorRTMPfromURL are managed by RoomClient.js
         this.rc = null;
         this.socket = null;
     }

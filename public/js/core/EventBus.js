@@ -9,7 +9,6 @@
 class EventBus {
     constructor() {
         this._listeners = new Map();
-        this._onceWrappers = new WeakMap();
     }
 
     /**
@@ -39,11 +38,7 @@ class EventBus {
         const listeners = this._listeners.get(event);
         if (!listeners) return this;
 
-        // Check if this callback was registered via once()
-        const wrapper = this._onceWrappers.get(callback);
-        const target = wrapper || callback;
-
-        const idx = listeners.indexOf(target);
+        const idx = listeners.findIndex((fn) => fn === callback || fn._original === callback);
         if (idx !== -1) {
             listeners.splice(idx, 1);
             if (listeners.length === 0) {
@@ -89,7 +84,7 @@ class EventBus {
             this.off(event, wrapper);
             callback(data);
         };
-        this._onceWrappers.set(callback, wrapper);
+        wrapper._original = callback;
         return this.on(event, wrapper);
     }
 

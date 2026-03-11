@@ -1031,13 +1031,8 @@ class FileShareManager {
         this.receiveBuffer = [];
         this.incomingFileData = [];
 
-        if (this.socket) {
-            this.socket.off('fileInfo');
-            this.socket.off('file');
-            this.socket.off('shareVideoAction');
-            this.socket.off('fileAbort');
-            this.socket.off('receiveFileAbort');
-        }
+        // Socket event listeners for fileInfo, file, shareVideoAction,
+        // fileAbort, and receiveFileAbort are managed by RoomClient.js
         this.rc = null;
         this.socket = null;
     }

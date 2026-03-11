@@ -13,6 +13,7 @@ class SocketManager {
         this._socket = null;
         this._connected = false;
         this._handlers = new Map(); // event -> [callbacks] for cleanup tracking
+        this._pendingHandlers = []; // handlers registered before connect
     }
 
     /**
@@ -29,6 +30,13 @@ class SocketManager {
 
         this._socket = io(url, options);
         this._setupCoreHandlers();
+
+        // Replay any handlers registered before connect
+        for (const { event, callback } of this._pendingHandlers) {
+            this.on(event, callback);
+        }
+        this._pendingHandlers = [];
+
         return this._socket;
     }
 
@@ -62,7 +70,7 @@ class SocketManager {
      */
     on(event, callback) {
         if (!this._socket) {
-            console.warn(`SocketManager.on("${event}"): socket not connected yet`);
+            this._pendingHandlers.push({ event, callback });
             return this;
         }
         this._socket.on(event, callback);

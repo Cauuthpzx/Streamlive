@@ -121,6 +121,21 @@ class DOMCache {
     }
 
     /**
+     * Get a cached element by ID, but only if it is still attached to the DOM.
+     * If the element has been detached, the cache entry is removed and null is returned.
+     * @param {string} id - Element ID
+     * @returns {HTMLElement|null}
+     */
+    getIfAttached(id) {
+        const el = this.get(id);
+        if (el && !el.isConnected) {
+            this._cache.delete(id);
+            return null;
+        }
+        return el;
+    }
+
+    /**
      * Get the number of cached entries.
      * @returns {number}
      */

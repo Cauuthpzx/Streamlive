@@ -80,10 +80,11 @@ class RecordingManager {
         if (rc.recSyncChunkSize !== undefined) this.recSyncChunkSize = rc.recSyncChunkSize;
 
         // Listen for incoming recordingAction from other peers
-        this.socket.on('recordingAction', (data) => {
+        this._onRecordingAction = (data) => {
             console.log('SocketOn Recording action:', data);
             this.handleRecordingAction(data);
-        });
+        };
+        this.socket.on('recordingAction', this._onRecordingAction);
     }
 
     // ####################################################
@@ -560,7 +561,7 @@ class RecordingManager {
                     userLog('warning', errorMessage, 'top-end', 3000);
                 }
                 this.stopRecording();
-                this.saveLastRecordingInfo('<br/><span class="red">' + errorMessage + '.</span>');
+                this.saveLastRecordingInfo('<br/><span class="red">' + this._escapeHtml(errorMessage) + '.</span>');
             }
         }
     }
@@ -721,6 +722,13 @@ class RecordingManager {
 
     // ####################################################
     // RECORDING INFO UI
+    // ####################################################
+
+    _escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     // ####################################################
 
     saveLastRecordingInfo(recordingInfo) {
@@ -933,7 +941,7 @@ class RecordingManager {
 
         // Detach socket listener
         if (this.socket) {
-            this.socket.off('recordingAction');
+            this.socket.off('recordingAction', this._onRecordingAction);
         }
 
         // Clear blobs

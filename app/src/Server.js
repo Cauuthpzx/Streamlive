@@ -363,7 +363,7 @@ const streams = {}; // Collect all rtmp streams
 const ROOM_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const ROOM_IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 
-setInterval(() => {
+const roomCleanupTimer = setInterval(() => {
     const now = Date.now();
     roomList.forEach((room, roomId) => {
         if (room.getPeers().size === 0 && room.lastActivity && (now - room.lastActivity > ROOM_IDLE_TIMEOUT)) {
@@ -373,6 +373,12 @@ setInterval(() => {
             delete presenters[roomId];
         }
     });
+    // Cleanup stale rate limit entries
+    for (const [key, record] of socketRateLimits) {
+        if (now > record.resetAt) {
+            socketRateLimits.delete(key);
+        }
+    }
 }, ROOM_CLEANUP_INTERVAL);
 
 // Rate limiter for socket events
@@ -512,7 +518,6 @@ function startServer() {
             crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow media resources
         })
     );
-    app.use(helmet.noSniff()); // Enable content type sniffing prevention
     // Use all static files from the public folder
     app.use(
         express.static(dir.public, {
@@ -4345,6 +4350,9 @@ async function gracefulShutdown(signal) {
 
     isShuttingDown = true;
     log.info(`${signal} received, starting graceful shutdown...`);
+
+    // Clear room cleanup timer
+    clearInterval(roomCleanupTimer);
 
     try {
         // 1. Stop accepting new connections

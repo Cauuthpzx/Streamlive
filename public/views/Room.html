@@ -90,7 +90,6 @@
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" />
 
         <!-- Modern or es5 bundle -->
-        <script defer src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.es5.min.js"></script>
 
         <!-- Bootstrap 5 -->
@@ -135,26 +134,14 @@
         <script defer src="../js/FixWebmDuration.js"></script>
         <script defer src="../js/WakeLock.js"></script>
 
-        <!-- Core infrastructure -->
-        <script defer src="../js/core/EventBus.js"></script>
-        <script defer src="../js/core/RoomState.js"></script>
-        <script defer src="../js/core/DOMCache.js"></script>
-        <script defer src="../js/core/SocketManager.js"></script>
+        <!--
+            Component architecture (core + managers) available in:
+            - js/core/ (EventBus, RoomState, DOMCache, SocketManager)
+            - js/components/ (11 managers: Whiteboard, Chat, Recording, Poll, Editor,
+              Participants, Settings, Toolbar, ScreenShare, FileShare, Rtmp)
+            Load these scripts when ready to integrate with Room.js/RoomClient.js
+        -->
 
-        <!-- Component managers -->
-        <script defer src="../js/components/WhiteboardManager.js"></script>
-        <script defer src="../js/components/ChatManager.js"></script>
-        <script defer src="../js/components/RecordingManager.js"></script>
-        <script defer src="../js/components/PollManager.js"></script>
-        <script defer src="../js/components/EditorManager.js"></script>
-        <script defer src="../js/components/ParticipantsManager.js"></script>
-        <script defer src="../js/components/SettingsManager.js"></script>
-        <script defer src="../js/components/ToolbarManager.js"></script>
-        <script defer src="../js/components/ScreenShareManager.js"></script>
-        <script defer src="../js/components/FileShareManager.js"></script>
-        <script defer src="../js/components/RtmpManager.js"></script>
-
-        <!-- Core (reduced) -->
         <script defer src="../js/RoomClient.js"></script>
         <script defer src="../js/Room.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>

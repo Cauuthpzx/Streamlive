@@ -43,9 +43,10 @@ class PollManager {
     // ####################################################
 
     _bindSocketEvents() {
-        this.socket.on('updatePolls', (data) => {
+        this._onUpdatePolls = (data) => {
             this.pollsUpdate(data);
-        });
+        };
+        this.socket.on('updatePolls', this._onUpdatePolls);
     }
 
     // ####################################################
@@ -381,10 +382,20 @@ class PollManager {
     // POLL EDIT HELPERS
     // ####################################################
 
+    _escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
     createPollInputs(poll) {
-        const questionInput = `<input id="swal-input-question" class="swal2-input" value="${poll.question}">`;
+        const questionInput = `<input id="swal-input-question" class="swal2-input" value="${this._escapeHtml(poll.question)}">`;
         const optionsInputs = poll.options
-            .map((option, i) => `<input id="swal-input-option${i}" class="swal2-input" value="${option}">`)
+            .map((option, i) => `<input id="swal-input-option${i}" class="swal2-input" value="${this._escapeHtml(option)}">`)
             .join('');
         return questionInput + optionsInputs;
     }
@@ -446,7 +457,7 @@ class PollManager {
 
     close() {
         if (this.socket) {
-            this.socket.off('updatePolls');
+            this.socket.off('updatePolls', this._onUpdatePolls);
         }
         if (this.isPollPinned) {
             this.pollUnpin();

@@ -134,9 +134,10 @@ class ChatManager {
     // ####################################################
 
     _bindSocketEvents() {
-        this.socket.on('message', (data) => {
+        this._onMessage = (data) => {
             this.showMessage(data);
-        });
+        };
+        this.socket.on('message', this._onMessage);
     }
 
     // ####################################################
@@ -1784,7 +1785,7 @@ class ChatManager {
 
     close() {
         if (this.socket) {
-            this.socket.off('message');
+            this.socket.off('message', this._onMessage);
         }
         if (this.isChatPinned) {
             this.chatUnpin();
