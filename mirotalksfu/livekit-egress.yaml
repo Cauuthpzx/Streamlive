@@ -1,0 +1,56 @@
+# ==============================================
+# LiveKit Egress Configuration
+# ==============================================
+#
+# Egress service handles recording and RTMP streaming.
+# It connects to the LiveKit server via Redis to receive
+# egress requests and publishes results back.
+#
+# Recording types:
+#   Room Composite  - Records entire room (headless Chrome + GStreamer)
+#   Web Egress      - Records any URL
+#   Track Composite - Records specific participant's tracks
+#   Track Egress    - Records individual track (audio or video)
+#
+# Output formats: MP4, OGG, HLS, WebM
+# Destinations: Local file, S3, GCS, Azure Blob
+#
+
+# API credentials (MUST match livekit.yaml)
+api_key: streamlive
+api_secret: streamlive_secret_change_me
+ws_url: ws://livekit-server:7880
+
+# Redis connection (coordinates with LiveKit server)
+redis:
+    address: redis:6379
+    db: 0
+
+# Health check
+health_port: 7880
+
+# Logging
+log_level: info
+
+# Recording output
+file_output:
+    local: /out    # Mount this volume in docker-compose
+
+# Resource limits per egress instance
+# Each room composite uses ~4 CPU + 4GB RAM
+cpu_cost:
+    room_composite_cpu_cost: 4.0
+    web_cpu_cost: 4.0
+    audio_room_composite_cpu_cost: 1.0
+    track_composite_cpu_cost: 2.0
+    track_cpu_cost: 1.0
+
+# Room Composite template (optional custom layout)
+# template_base: http://mirotalksfu:3010/livekit-layout
+
+# S3 upload (optional - uncomment to enable)
+# s3:
+#     access_key: your_access_key
+#     secret: your_secret_key
+#     region: us-east-1
+#     bucket: your-bucket-name

@@ -1,0 +1,82 @@
+# ==============================================
+# LiveKit Server Configuration (Go SFU)
+# ==============================================
+#
+# This file configures the LiveKit server (Go binary) that runs
+# alongside MiroTalk SFU as a complementary/alternative WebRTC engine.
+#
+# LiveKit Server handles:
+# - WebRTC media routing (audio/video/screen sharing)
+# - Simulcast, SVC (VP9/AV1), adaptive bitrate
+# - Built-in TURN server for NAT traversal
+# - Room management and participant lifecycle
+#
+# Documentation: https://docs.livekit.io/realtime/self-hosting/
+#
+# Usage:
+#   docker-compose -f docker-compose.livekit.yml up
+#   OR
+#   livekit-server --config livekit.yaml
+#
+
+# Logging
+logging:
+    json: false
+    level: info    # debug, info, warn, error
+
+# API credentials (MUST match .env LIVEKIT_API_KEY / LIVEKIT_API_SECRET)
+keys:
+    # Generate secure keys: openssl rand -base64 32
+    # Format: api_key: api_secret
+    streamlive: streamlive_secret_change_me
+
+# Ports
+port: 7880          # HTTP/WebSocket signaling port
+rtc:
+    port_range_start: 50000
+    port_range_end: 60000
+    # Set to your server's public IP for production
+    # use_external_ip: true
+    # node_ip: 1.2.3.4
+    tcp_port: 7881  # TCP fallback for restrictive networks
+
+# TURN server (built-in, helps with NAT traversal)
+turn:
+    enabled: true
+    domain: ""      # Set to your domain for TLS TURN
+    tls_port: 5349  # TURN over TLS
+    udp_port: 3478  # TURN over UDP
+
+# Room defaults
+room:
+    empty_timeout: 300          # Close room after 5 min if empty (seconds)
+    max_participants: 100       # Max participants per room
+    auto_create: true           # Create rooms on first join
+    enable_remote_unmute: false # Don't allow remote unmute (privacy)
+
+# Codec preferences (matched to Streamlive config.template.js)
+codecs:
+    video:
+        - mime: video/VP8
+        - mime: video/VP9
+        - mime: video/H264
+
+# Webhook configuration (sends events to Streamlive)
+webhook:
+    urls:
+        # Point to your Streamlive server's webhook endpoint
+        - http://mirotalksfu:3010/api/v1/livekit/webhook
+    api_key: streamlive
+
+# Redis (required for multi-node / Egress / Ingress)
+# Uncomment for production with Egress/Ingress services
+# redis:
+#     address: redis:6379
+#     db: 0
+
+# Resource limits
+limit:
+    num_tracks: 50              # Max tracks per participant
+    bytes_per_sec: 10000000     # 10 MB/s bandwidth limit per participant
+    subscription_limit:
+        per_participant: 50     # Max subscriptions per participant

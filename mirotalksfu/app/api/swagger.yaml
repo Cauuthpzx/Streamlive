@@ -150,6 +150,239 @@ paths:
                 '403':
                     description: 'Unauthorized!'
 
+    # ==========================================
+    # LiveKit Integration Endpoints
+    # ==========================================
+
+    /livekit/token:
+        post:
+            tags:
+                - 'livekit'
+            summary: 'Generate LiveKit access token'
+            description: 'Generate a JWT access token for connecting to LiveKit server. Requires LiveKit to be enabled.'
+            parameters:
+                - in: body
+                  name: body
+                  required: true
+                  schema:
+                      $ref: '#/definitions/LiveKitTokenRequest'
+            consumes:
+                - 'application/json'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'Token generated'
+                    schema:
+                        $ref: '#/definitions/LiveKitTokenResponse'
+                '403':
+                    description: 'Unauthorized'
+                '500':
+                    description: 'LiveKit not enabled or error generating token'
+
+    /livekit/room-token:
+        post:
+            tags:
+                - 'livekit'
+            summary: 'Generate LiveKit room token'
+            description: 'Generate a token for joining a specific LiveKit room (for existing Socket.io clients).'
+            parameters:
+                - in: body
+                  name: body
+                  required: true
+                  schema:
+                      $ref: '#/definitions/LiveKitTokenRequest'
+            consumes:
+                - 'application/json'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'Room token generated'
+                    schema:
+                        $ref: '#/definitions/LiveKitTokenResponse'
+                '403':
+                    description: 'Unauthorized'
+
+    /livekit/rooms:
+        get:
+            tags:
+                - 'livekit'
+            summary: 'List active LiveKit rooms'
+            description: 'Returns all active rooms on the LiveKit server with participant counts.'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'Active rooms list'
+                    schema:
+                        $ref: '#/definitions/LiveKitRoomsResponse'
+                '403':
+                    description: 'Unauthorized'
+
+    /livekit/room/{roomName}:
+        get:
+            tags:
+                - 'livekit'
+            summary: 'Get LiveKit room stats'
+            description: 'Returns detailed statistics for a specific LiveKit room.'
+            parameters:
+                - in: path
+                  name: roomName
+                  required: true
+                  type: string
+                  description: 'Room name'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'Room stats'
+                    schema:
+                        $ref: '#/definitions/LiveKitRoomStatsResponse'
+                '403':
+                    description: 'Unauthorized'
+
+    /livekit/recording/start:
+        post:
+            tags:
+                - 'livekit'
+            summary: 'Start LiveKit recording'
+            description: 'Start recording a LiveKit room using Egress service. Requires Egress to be running.'
+            parameters:
+                - in: body
+                  name: body
+                  required: true
+                  schema:
+                      $ref: '#/definitions/LiveKitRecordingRequest'
+            consumes:
+                - 'application/json'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'Recording started'
+                '403':
+                    description: 'Unauthorized'
+                '500':
+                    description: 'Failed to start recording'
+
+    /livekit/recording/stop:
+        post:
+            tags:
+                - 'livekit'
+            summary: 'Stop LiveKit recording'
+            description: 'Stop an active recording/egress.'
+            parameters:
+                - in: body
+                  name: body
+                  required: true
+                  schema:
+                      type: object
+                      properties:
+                          roomName:
+                              type: string
+            consumes:
+                - 'application/json'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'Recording stopped'
+                '403':
+                    description: 'Unauthorized'
+
+    /livekit/rtmp/start:
+        post:
+            tags:
+                - 'livekit'
+            summary: 'Start RTMP stream via LiveKit'
+            description: 'Start RTMP streaming from a LiveKit room to external services (YouTube, Twitch, etc).'
+            parameters:
+                - in: body
+                  name: body
+                  required: true
+                  schema:
+                      $ref: '#/definitions/LiveKitRtmpRequest'
+            consumes:
+                - 'application/json'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'RTMP stream started'
+                '403':
+                    description: 'Unauthorized'
+
+    /livekit/ingress/create:
+        post:
+            tags:
+                - 'livekit'
+            summary: 'Create RTMP/WHIP ingress'
+            description: 'Create an ingress point for external RTMP/WHIP streams (OBS, hardware encoders) into a LiveKit room.'
+            parameters:
+                - in: body
+                  name: body
+                  required: true
+                  schema:
+                      $ref: '#/definitions/LiveKitIngressRequest'
+            consumes:
+                - 'application/json'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'Ingress created with stream URL and key'
+                '403':
+                    description: 'Unauthorized'
+
+    /livekit/webhook:
+        post:
+            tags:
+                - 'livekit'
+            summary: 'LiveKit webhook receiver'
+            description: 'Receives webhook events from LiveKit server (room created, participant joined, etc).'
+            consumes:
+                - 'application/webhook+json'
+            produces:
+                - 'application/json'
+            responses:
+                '200':
+                    description: 'Webhook processed'
+
+    /livekit/health:
+        get:
+            tags:
+                - 'livekit'
+            summary: 'LiveKit health check'
+            description: 'Check if LiveKit integration is enabled and the server is reachable.'
+            produces:
+                - 'application/json'
+            security:
+                - secretApiKey: []
+            responses:
+                '200':
+                    description: 'Health status'
+                    schema:
+                        $ref: '#/definitions/LiveKitHealthResponse'
+                '403':
+                    description: 'Unauthorized'
+
 securityDefinitions:
     secretApiKey:
         type: 'apiKey'
@@ -293,3 +526,134 @@ definitions:
                 type: array
                 items:
                     $ref: '#/definitions/Peer'
+
+    # ==========================================
+    # LiveKit Definitions
+    # ==========================================
+
+    LiveKitTokenRequest:
+        type: object
+        required:
+            - identity
+            - room
+        properties:
+            identity:
+                type: string
+                description: 'Unique participant identity'
+                default: 'user1'
+            room:
+                type: string
+                description: 'Room name to join'
+                default: 'test-room'
+            canPublish:
+                type: boolean
+                description: 'Allow publishing audio/video'
+                default: true
+            canSubscribe:
+                type: boolean
+                description: 'Allow subscribing to others'
+                default: true
+
+    LiveKitTokenResponse:
+        type: object
+        properties:
+            token:
+                type: string
+                description: 'JWT access token for LiveKit server'
+            wsUrl:
+                type: string
+                description: 'LiveKit WebSocket URL to connect to'
+
+    LiveKitRoomsResponse:
+        type: object
+        properties:
+            rooms:
+                type: array
+                items:
+                    type: object
+                    properties:
+                        name:
+                            type: string
+                        numParticipants:
+                            type: integer
+                        maxParticipants:
+                            type: integer
+                        creationTime:
+                            type: string
+
+    LiveKitRoomStatsResponse:
+        type: object
+        properties:
+            room:
+                type: object
+                properties:
+                    name:
+                        type: string
+                    numParticipants:
+                        type: integer
+            participants:
+                type: array
+                items:
+                    type: object
+                    properties:
+                        identity:
+                            type: string
+                        state:
+                            type: string
+                        tracks:
+                            type: integer
+
+    LiveKitRecordingRequest:
+        type: object
+        required:
+            - roomName
+        properties:
+            roomName:
+                type: string
+                description: 'Room to record'
+            outputFile:
+                type: string
+                description: 'Output file path (optional)'
+
+    LiveKitRtmpRequest:
+        type: object
+        required:
+            - roomName
+            - rtmpUrl
+        properties:
+            roomName:
+                type: string
+                description: 'Room to stream'
+            rtmpUrl:
+                type: string
+                description: 'RTMP destination URL (e.g., rtmp://live.twitch.tv/app/stream-key)'
+
+    LiveKitIngressRequest:
+        type: object
+        required:
+            - roomName
+            - participantIdentity
+        properties:
+            roomName:
+                type: string
+                description: 'Target room for the ingress stream'
+            participantIdentity:
+                type: string
+                description: 'Identity for the ingress participant'
+            participantName:
+                type: string
+                description: 'Display name for the ingress participant'
+
+    LiveKitHealthResponse:
+        type: object
+        properties:
+            enabled:
+                type: boolean
+            connected:
+                type: boolean
+            server:
+                type: string
+                description: 'LiveKit server URL'
+            rooms:
+                type: integer
+                description: 'Number of active rooms'

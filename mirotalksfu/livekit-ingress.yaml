@@ -1,0 +1,46 @@
+# ==============================================
+# LiveKit Ingress Configuration
+# ==============================================
+#
+# Ingress service accepts incoming streams (RTMP, WHIP)
+# and publishes them as participants into LiveKit rooms.
+#
+# Supported protocols:
+#   RTMP - For OBS, hardware encoders (port 1935)
+#   WHIP - WebRTC HTTP Ingest Protocol (port 8080)
+#
+# Usage:
+#   1. Create ingress via API: POST /api/v1/livekit/ingress/create
+#   2. Get stream URL + stream key from response
+#   3. Configure OBS/encoder with the URL + key
+#   4. Start streaming - appears as participant in LiveKit room
+#
+
+# API credentials (MUST match livekit.yaml)
+api_key: streamlive
+api_secret: streamlive_secret_change_me
+ws_url: ws://livekit-server:7880
+
+# Redis connection
+redis:
+    address: redis:6379
+    db: 0
+
+# Health check
+health_port: 7881
+
+# Logging
+log_level: info
+
+# RTMP settings
+rtmp_port: 1935
+
+# WHIP settings (WebRTC HTTP Ingest)
+http_relay_port: 9090
+whip_port: 8080
+
+# CPU cost per ingress stream
+cpu_cost:
+    rtmp_cpu_cost: 2.0
+    whip_cpu_cost: 0.5
+    whip_bypass_transcoding_cpu_cost: 0.2
