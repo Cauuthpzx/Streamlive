@@ -119,7 +119,7 @@ module.exports = class Logger {
             time = Math.floor((ms / 1000 / 60) % 60);
             type = 'm';
         }
-        if (ms >= (3, 6e6)) {
+        if (ms >= 3.6e6) {
             time = Math.floor((ms / 1000 / 60 / 60) % 24);
             type = 'h';
         }

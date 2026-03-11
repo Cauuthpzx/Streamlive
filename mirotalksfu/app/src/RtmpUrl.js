@@ -22,6 +22,24 @@ class RtmpUrl {
             return false;
         }
 
+        // Validate input URL - only allow http/https, reject shell metacharacters
+        try {
+            const parsed = new URL(inputVideoURL);
+            if (!['http:', 'https:'].includes(parsed.protocol)) {
+                log.error('RtmpUrl: Invalid URL protocol', parsed.protocol);
+                return false;
+            }
+        } catch (e) {
+            log.error('RtmpUrl: Invalid URL', inputVideoURL);
+            return false;
+        }
+
+        // Reject shell metacharacters in URLs
+        if (/[;`$|&<>]/.test(inputVideoURL)) {
+            log.error('RtmpUrl: URL contains invalid characters');
+            return false;
+        }
+
         this.rtmpUrl = rtmpUrl;
 
         try {
@@ -79,13 +97,13 @@ class RtmpUrl {
     handleEnd() {
         if (!this.room) return;
         this.room.send(this.socketId, 'endRTMPfromURL', { rtmpUrl: this.rtmpUrl });
-        this.room.rtmpUrlStreamer = false;
+        this.room.rtmpUrlStreamer = null;
     }
 
     handleError(message, stdout, stderr) {
         if (!this.room) return;
         this.room.send(this.socketId, 'errorRTMPfromURL', { message });
-        this.room.rtmpUrlStreamer = false;
+        this.room.rtmpUrlStreamer = null;
         log.error('Error: ' + message, { stdout, stderr });
     }
 }

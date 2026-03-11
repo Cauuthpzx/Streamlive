@@ -60,7 +60,10 @@ class Mattermost {
             log.debug('Mattermost request received:', { header: req.header, body: req.body });
 
             const { token, text, command, channel_id } = req.body;
-            if (token !== this.token) {
+            const crypto_node = require('crypto');
+            const tokenBuf = Buffer.from(String(token || ''));
+            const expectedBuf = Buffer.from(String(this.token || ''));
+            if (tokenBuf.length !== expectedBuf.length || !crypto_node.timingSafeEqual(tokenBuf, expectedBuf)) {
                 log.error('Invalid token attempt', { token });
                 return res.status(403).send('Invalid token');
             }
@@ -87,6 +90,10 @@ class Mattermost {
     }
 
     getMeetingURL(req) {
+        const baseUrl = config.server?.hostUrl;
+        if (baseUrl) {
+            return `${baseUrl}/join/${uuidV4()}`;
+        }
         const host = req.headers.host;
         const protocol = host.includes('localhost') ? 'http' : 'https';
         return `${protocol}://${host}/join/${uuidV4()}`;

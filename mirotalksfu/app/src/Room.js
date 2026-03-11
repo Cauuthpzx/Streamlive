@@ -65,11 +65,11 @@ module.exports = class Room {
         this.redirect = config?.features?.redirect;
         this.videoAIEnabled = config?.integrations?.videoAI?.enabled || false;
         this.peers = new Map();
-        this.bannedPeers = [];
+        this.bannedPeers = new Set();
         this.webRtcTransport = config.mediasoup.webRtcTransport;
         this.router = null;
         this.routerSettings = config.mediasoup.router;
-        this.createTheRouter();
+        this._routerReady = this.createTheRouter();
 
         // RTMP configuration
         this.rtmpFileStreamer = null;
@@ -116,10 +116,16 @@ module.exports = class Room {
             thereIsPolls: this.thereIsPolls(),
             shareMediaData: this.shareMediaData,
             dominantSpeaker: this.activeSpeakerObserverEnabled,
-            peers: JSON.stringify([...this.peers]),
+            peers: JSON.stringify(
+                Array.from(this.peers.values()).map((p) => ({
+                    id: p.id,
+                    peer_name: p.peer_name,
+                    peer_info: p.peer_info,
+                }))
+            ),
             peersCount: this.getPeersCount(),
             maxParticipants: this.maxParticipants,
-            maxParticipantsReached: this.peers.size > this.maxParticipants,
+            maxParticipantsReached: this.peers.size >= this.maxParticipants,
             globalLobby: this.globalLobby,
         };
     }
@@ -190,7 +196,13 @@ module.exports = class Room {
             return false;
         }
 
-        const inputFilePath = path.join(__dirname, file);
+        // Path traversal protection: ensure file stays within rtmp directory
+        const rtmpDir = path.resolve(__dirname, '../rtmp');
+        const inputFilePath = path.resolve(__dirname, file);
+        if (!inputFilePath.startsWith(rtmpDir)) {
+            log.error(`[startRTMP] Path traversal detected: ${file}`);
+            return false;
+        }
 
         if (!fs.existsSync(inputFilePath)) {
             log.error(`[startRTMP] File not found: ${inputFilePath}`);
@@ -208,7 +220,7 @@ module.exports = class Room {
         const rtmpRun = await this.rtmpFileStreamer.start(inputStream, rtmpUrl);
 
         if (!rtmpRun) {
-            this.rtmpFileStreamer = false;
+            this.rtmpFileStreamer = null;
             return this.rtmpFileStreamer;
         }
         return rtmpUrl;
@@ -255,6 +267,33 @@ module.exports = class Room {
             return false;
         }
 
+        // SSRF protection: only allow http/https URLs
+        try {
+            const parsedUrl = new URL(inputVideoURL);
+            if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+                log.error(`[startRTMPfromURL] Invalid URL protocol: ${parsedUrl.protocol}`);
+                return false;
+            }
+            // Block internal/private IPs
+            const hostname = parsedUrl.hostname;
+            if (
+                hostname === 'localhost' ||
+                hostname === '127.0.0.1' ||
+                hostname.startsWith('10.') ||
+                hostname.startsWith('192.168.') ||
+                hostname.startsWith('172.') ||
+                hostname === '169.254.169.254' ||
+                hostname === '0.0.0.0' ||
+                hostname === '[::1]'
+            ) {
+                log.error(`[startRTMPfromURL] Blocked internal URL: ${hostname}`);
+                return false;
+            }
+        } catch (e) {
+            log.error(`[startRTMPfromURL] Invalid URL: ${inputVideoURL}`);
+            return false;
+        }
+
         log.debug('[startRTMPfromURL] Input video URL', inputVideoURL);
 
         this.rtmpUrlStreamer = new RtmpUrl(socket_id, room);
@@ -264,7 +303,7 @@ module.exports = class Room {
         const rtmpRun = await this.rtmpUrlStreamer.start(inputVideoURL, rtmpUrl);
 
         if (!rtmpRun) {
-            this.rtmpUrlStreamer = false;
+            this.rtmpUrlStreamer = null;
             return this.rtmpUrlStreamer;
         }
         return rtmpUrl;
@@ -304,14 +343,14 @@ module.exports = class Room {
             ? this.generateRTMPUrl(rtmpServerURL, rtmpServerPath, rtmpServerSecret, expirationHours)
             : rtmpServerURL + rtmpServerPath;
 
-        log.info('RTMP Url generated', rtmpUrl);
+        log.debug('RTMP Url generated', rtmpUrl.replace(/sign=.*$/, 'sign=***'));
         return rtmpUrl;
     }
 
     generateRTMPUrl(baseURL, streamPath, secretKey, expirationHours = 8) {
         const currentTime = Math.floor(Date.now() / 1000);
         const expirationTime = currentTime + expirationHours * 3600;
-        const hashValue = crypto.MD5(`${streamPath}-${expirationTime}-${secretKey}`).toString();
+        const hashValue = crypto.HmacSHA256(`${streamPath}-${expirationTime}`, secretKey).toString();
         const rtmpUrl = `${baseURL}${streamPath}?sign=${expirationTime}-${hashValue}`;
         return rtmpUrl;
     }
@@ -320,32 +359,35 @@ module.exports = class Room {
     // ROUTER
     // ####################################################
 
-    createTheRouter() {
+    async createTheRouter() {
         const { mediaCodecs } = this.routerSettings;
-        this.worker
-            .createRouter({
-                mediaCodecs,
-            })
-            .then((router) => {
-                this.router = router;
-                if (this.audioLevelObserverEnabled) {
-                    log.debug('Audio Level Observer enabled, starting observation...');
-                    this.startAudioLevelObservation().catch((err) => {
-                        log.error('Failed to start audio level observation', err);
-                    });
-                }
-                if (this.activeSpeakerObserverEnabled) {
-                    log.debug('Active Speaker Observer enabled, starting observation...');
-                    this.startActiveSpeakerObserver().catch((err) => {
-                        log.error('Failed to start active speaker observer', err);
-                    });
-                }
-                this.router.observer.on('close', () => {
-                    log.debug('---------------> Router is now closed as the last peer has left the room', {
-                        room: this.id,
-                    });
+        try {
+            this.router = await this.worker.createRouter({ mediaCodecs });
+            if (this.audioLevelObserverEnabled) {
+                log.debug('Audio Level Observer enabled, starting observation...');
+                await this.startAudioLevelObservation().catch((err) => {
+                    log.error('Failed to start audio level observation', err);
+                });
+            }
+            if (this.activeSpeakerObserverEnabled) {
+                log.debug('Active Speaker Observer enabled, starting observation...');
+                await this.startActiveSpeakerObserver().catch((err) => {
+                    log.error('Failed to start active speaker observer', err);
+                });
+            }
+            this.router.observer.on('close', () => {
+                log.debug('---------------> Router is now closed as the last peer has left the room', {
+                    room: this.id,
                 });
             });
+        } catch (error) {
+            log.error('Failed to create router', error);
+            throw error;
+        }
+    }
+
+    async waitForRouter() {
+        if (this._routerReady) await this._routerReady;
     }
 
     getRtpCapabilities() {
@@ -392,7 +434,7 @@ module.exports = class Room {
     sendActiveSpeakerVolume(volumes) {
         try {
             if (!Array.isArray(volumes) || volumes.length === 0) {
-                throw new Error('Invalid volumes array');
+                return;
             }
 
             if (Date.now() > this.audioLastUpdateTime + 100) {
@@ -425,7 +467,7 @@ module.exports = class Room {
     }
 
     addProducerToAudioLevelObserver(producer) {
-        if (this.audioLevelObserverEnabled) {
+        if (this.audioLevelObserverEnabled && this.audioLevelObserver) {
             this.audioLevelObserver.addProducer(producer);
             log.debug('Producer added to audio level observer', { producer });
         }
@@ -483,7 +525,7 @@ module.exports = class Room {
     }
 
     addProducerToActiveSpeakerObserver(producer) {
-        if (this.activeSpeakerObserverEnabled) {
+        if (this.activeSpeakerObserverEnabled && this.activeSpeakerObserver) {
             this.activeSpeakerObserver.addProducer(producer);
             log.debug('Producer added to active speaker observer', { producer });
         }
@@ -610,7 +652,11 @@ module.exports = class Room {
 
         const peer = this.getPeer(socket_id);
 
-        peer.close();
+        try {
+            peer.close();
+        } catch (error) {
+            log.error('Error closing peer during removal', { socket_id, error: error.message });
+        }
 
         this.delPeer(peer);
 
@@ -981,17 +1027,17 @@ module.exports = class Room {
     // ####################################################
 
     addBannedPeer(uuid) {
-        if (!this.bannedPeers.includes(uuid)) {
-            this.bannedPeers.push(uuid);
+        if (!this.bannedPeers.has(uuid)) {
+            this.bannedPeers.add(uuid);
             log.debug('Added to the banned list', {
                 uuid: uuid,
-                banned: this.bannedPeers,
+                banned: [...this.bannedPeers],
             });
         }
     }
 
     isBanned(uuid) {
-        return this.bannedPeers.includes(uuid);
+        return this.bannedPeers.has(uuid);
     }
 
     // ####################################################
@@ -1046,8 +1092,8 @@ module.exports = class Room {
     }
 
     sendTo(socket_id, action, data) {
-        for (let peer_id of Array.from(this.peers.keys()).filter((id) => id === socket_id)) {
-            this.send(peer_id, action, data);
+        if (this.peers.has(socket_id)) {
+            this.send(socket_id, action, data);
         }
     }
 

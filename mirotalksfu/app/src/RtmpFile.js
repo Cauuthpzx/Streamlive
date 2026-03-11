@@ -83,13 +83,13 @@ class RtmpFile {
     handleEnd() {
         if (!this.room) return;
         this.room.send(this.socketId, 'endRTMP', { rtmpUrl: this.rtmpUrl });
-        this.room.rtmpFileStreamer = false;
+        this.room.rtmpFileStreamer = null;
     }
 
     handleError(message, stdout, stderr) {
         if (!this.room) return;
         this.room.send(this.socketId, 'errorRTMP', { message });
-        this.room.rtmpFileStreamer = false;
+        this.room.rtmpFileStreamer = null;
         log.error('Error: ' + message, { stdout, stderr });
     }
 }

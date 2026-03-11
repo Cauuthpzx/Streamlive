@@ -8,6 +8,15 @@ const log = new Logger('NodeMailer');
 
 const APP_NAME = config.ui.brand.app.name || 'MiroTalk SFU';
 
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // ####################################################
 // EMAIL CONFIG
 // ####################################################
@@ -29,22 +38,25 @@ if ((EMAIL_ALERT || EMAIL_NOTIFY) && EMAIL_HOST && EMAIL_PORT && EMAIL_USERNAME 
         host: EMAIL_HOST,
         port: EMAIL_PORT,
         username: EMAIL_USERNAME,
-        password: EMAIL_PASSWORD,
+        password: '***',
         from: EMAIL_FROM,
         to: EMAIL_SEND_TO,
     });
 }
 
 const IS_TLS_PORT = EMAIL_PORT === 465;
-const transport = nodemailer.createTransport({
-    host: EMAIL_HOST,
-    port: EMAIL_PORT,
-    secure: IS_TLS_PORT,
-    auth: {
-        user: EMAIL_USERNAME,
-        pass: EMAIL_PASSWORD,
-    },
-});
+const transport =
+    EMAIL_HOST && EMAIL_PORT && EMAIL_USERNAME && EMAIL_PASSWORD
+        ? nodemailer.createTransport({
+              host: EMAIL_HOST,
+              port: EMAIL_PORT,
+              secure: IS_TLS_PORT,
+              auth: {
+                  user: EMAIL_USERNAME,
+                  pass: EMAIL_PASSWORD,
+              },
+          })
+        : null;
 
 // ####################################################
 // EMAIL SEND ALERTS AND NOTIFICATIONS
@@ -113,11 +125,12 @@ function sendEmailNotifications(event, data, notifications) {
         sendEmail(subject, body, emailSendTo);
         return true;
     }
-    log.error('sendEmailNotifications: Invalid email', { email: emailTo });
+    log.error('sendEmailNotifications: Invalid email', { email: emailSendTo });
     return false;
 }
 
 function sendEmail(subject, body, emailSendTo = false) {
+    if (!transport) return;
     transport
         .sendMail({
             from: EMAIL_FROM,
@@ -169,19 +182,19 @@ function getJoinRoomBody(data) {
         <table>
             <tr>
                 <td>User</td>
-                <td>${peer_name}</td>
+                <td>${escapeHtml(peer_name)}</td>
             </tr>
             <tr>
                 <td>Os</td>
-                <td>${os}</td>
+                <td>${escapeHtml(os)}</td>
             </tr>
             <tr>
                 <td>Browser</td>
-                <td>${browser}</td>
+                <td>${escapeHtml(browser)}</td>
             </tr>
             <tr>
                 <td>Room</td>
-                <td>${room_join}${room_id}</td>
+                <td>${escapeHtml(room_join)}${escapeHtml(room_id)}</td>
             </tr>
             <tr>
                 <td>Date, Time</td>
@@ -238,7 +251,7 @@ function getAlertBody(data) {
         <table>
             <tr>
                 <td>⚠️ Alert</td>
-                <td>${body}</td>
+                <td>${escapeHtml(body)}</td>
             </tr>
             <tr>
                 <td>🕒 Date, Time</td>

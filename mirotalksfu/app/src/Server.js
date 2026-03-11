@@ -487,8 +487,8 @@ function startServer() {
     );
     app.use(cors(corsOptions));
     app.use(compression());
-    app.use(express.json({ limit: '50mb' })); // Handles JSON payloads
-    app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Handles URL-encoded payloads
+    app.use(express.json({ limit: '5mb' })); // Handles JSON payloads
+    app.use(express.urlencoded({ extended: true, limit: '5mb' })); // Handles URL-encoded payloads
     app.use(express.raw({ type: 'video/webm', limit: '50mb' })); // Handles raw binary data
     app.use(restApi.basePath + '/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument)); // api docs
 
@@ -519,7 +519,7 @@ function startServer() {
                 body: req.body,
                 error: err.message,
             });
-            return res.status(400).send({ status: 404, message: err.message }); // Bad request
+            return res.status(400).send({ status: 400, message: 'Bad request' }); // Bad request
         }
 
         // Prevent open redirect attacks by checking if the path is an external domain
@@ -558,7 +558,7 @@ function startServer() {
                 auth(dynamicOIDCConfig)(req, res, next);
             } catch (err) {
                 log.error('OIDC Auth Middleware Error', err);
-                process.exit(1);
+                return res.status(500).send('Authentication service error');
             }
         });
     }
@@ -888,7 +888,7 @@ function startServer() {
     // handle login on host protected
     app.post('/login', loginLimiter, async (req, res) => {
         const ip = getIP(req);
-        log.debug(`Request login to host from: ${ip}`, req.body);
+        log.debug(`Request login to host from: ${ip}`, { username: req.body?.username });
 
         const safeBody = checkXSS(req.body) || {};
         const { username, password } = safeBody;
@@ -915,7 +915,7 @@ function startServer() {
             );
 
             const user = hostCfg.users.find((user) => user.displayname === username || user.username === username);
-            const token = encodeToken({ username: username, password: password, presenter: isPresenter });
+            const token = encodeToken({ username: username, presenter: isPresenter });
             const allowedRooms = await getUserAllowedRooms(username, password);
 
             log.debug('login -------------->', { displayName: user?.displayname || username });
@@ -928,7 +928,7 @@ function startServer() {
         if (isPeerValid) {
             log.debug('PEER LOGIN OK', { ip: ip, authorized: true });
             const isPresenter = hostCfg?.presenters?.list?.includes(username) || false;
-            const token = encodeToken({ username: username, password: password, presenter: isPresenter });
+            const token = encodeToken({ username: username, presenter: isPresenter });
             const allowedRooms = await getUserAllowedRooms(username, password);
             return res.status(200).json({ message: token, allowedRooms: allowedRooms });
         } else {
@@ -947,6 +947,12 @@ function startServer() {
         }
 
         if (!fileName || sanitizeFilename(fileName) !== fileName || !Validator.isValidRecFileNameFormat(fileName)) {
+            throw new Error('Invalid file name');
+        }
+
+        // Path traversal protection: ensure resolved path stays within rec directory
+        const resolvedPath = path.resolve(dir.rec, fileName);
+        if (!resolvedPath.startsWith(path.resolve(dir.rec))) {
             throw new Error('Invalid file name');
         }
 
@@ -1535,7 +1541,13 @@ function startServer() {
         const sigBaseString = 'v0:' + timeStamp + ':' + requestBody;
         const mySignature = 'v0=' + CryptoJS.HmacSHA256(sigBaseString, slackSigningSecret);
 
-        if (mySignature == slackSignature) {
+        const crypto_node = require('crypto');
+        const mySignatureBuffer = Buffer.from(String(mySignature));
+        const slackSignatureBuffer = Buffer.from(String(slackSignature));
+        if (
+            mySignatureBuffer.length === slackSignatureBuffer.length &&
+            crypto_node.timingSafeEqual(mySignatureBuffer, slackSignatureBuffer)
+        ) {
             const host = req.headers.host;
             const api = new ServerApi(host);
             const meetingURL = api.getMeetingURL();
@@ -1558,7 +1570,10 @@ function startServer() {
             });
         }
         // check if user was authorized for the api call
-        const { host, authorization = config.api.keySecret } = req.headers;
+        const { host, authorization } = req.headers;
+        if (!authorization) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
         const api = new ServerApi(host, authorization);
 
         // Get active rooms
@@ -2504,7 +2519,7 @@ function startServer() {
                         room: null,
                         password: 'KO',
                     };
-                    if (data.password == room.getPassword()) {
+                    if (data.password === room.getPassword()) {
                         roomData.room = room.toJson();
                         roomData.password = 'OK';
                     }
@@ -2540,6 +2555,7 @@ function startServer() {
                     room.broadCast(socket.id, 'roomAction', data.action);
                     break;
                 case 'isBanned':
+                    if (!isPresenter) return;
                     log.debug('The user has been banned from the room due to spamming messages', data);
                     room.addBannedPeer(data.peer_uuid);
                     break;
@@ -3375,7 +3391,7 @@ function startServer() {
 
             const room = getRoom(socket);
 
-            rtmpFileStreamsCount--;
+            rtmpFileStreamsCount = Math.max(0, rtmpFileStreamsCount - 1);
 
             log.debug('stopRTMP - rtmpFileStreamsCount ---->', rtmpFileStreamsCount);
 
@@ -3385,7 +3401,7 @@ function startServer() {
         socket.on('endOrErrorRTMP', async () => {
             if (!roomExists(socket)) return;
 
-            rtmpFileStreamsCount--;
+            rtmpFileStreamsCount = Math.max(0, rtmpFileStreamsCount - 1);
 
             log.debug('endRTMP - rtmpFileStreamsCount ---->', rtmpFileStreamsCount);
         });
@@ -3427,7 +3443,7 @@ function startServer() {
 
             const room = getRoom(socket);
 
-            rtmpUrlStreamsCount--;
+            rtmpUrlStreamsCount = Math.max(0, rtmpUrlStreamsCount - 1);
 
             log.debug('stopRTMPfromURL - rtmpUrlStreamsCount ---->', rtmpUrlStreamsCount);
 
@@ -3437,7 +3453,7 @@ function startServer() {
         socket.on('endOrErrorRTMPfromURL', async () => {
             if (!roomExists(socket)) return;
 
-            rtmpUrlStreamsCount--;
+            rtmpUrlStreamsCount = Math.max(0, rtmpUrlStreamsCount - 1);
 
             log.debug('endRTMPfromURL - rtmpUrlStreamsCount ---->', rtmpUrlStreamsCount);
         });
@@ -3526,9 +3542,8 @@ function startServer() {
 
             const { index, peer_name, peer_uuid } = checkXSS(data);
 
-            // Disable for now...
-            // const isPresenter = isPeerPresenter(socket.room_id, socket.id, peer_name, peer_uuid);
-            // if (!isPresenter) return;
+            const isPresenter = isPeerPresenter(socket.room_id, socket.id, peer_name, peer_uuid);
+            if (!isPresenter) return;
 
             const room = getRoom(socket);
 
@@ -3546,8 +3561,7 @@ function startServer() {
         socket.on('editorChange', (dataObject) => {
             if (!roomExists(socket)) return;
 
-            //const data = checkXSS(dataObject);
-            const data = dataObject;
+            const data = checkXSS(dataObject);
 
             const room = getRoom(socket);
 
@@ -3569,8 +3583,7 @@ function startServer() {
         socket.on('editorUpdate', (dataObject) => {
             if (!roomExists(socket)) return;
 
-            //const data = checkXSS(dataObject);
-            const data = dataObject;
+            const data = checkXSS(dataObject);
 
             const room = getRoom(socket);
 
@@ -3815,12 +3828,12 @@ function startServer() {
         if (isPresenter) {
             if (room.isRtmpFileStreamerActive()) {
                 room.stopRTMP();
-                rtmpFileStreamsCount--;
+                rtmpFileStreamsCount = Math.max(0, rtmpFileStreamsCount - 1);
                 log.debug('[REMOVE ME] - Stop RTMP Stream From FIle', rtmpFileStreamsCount);
             }
             if (room.isRtmpUrlStreamerActive()) {
                 room.stopRTMPfromURL();
-                rtmpUrlStreamsCount--;
+                rtmpUrlStreamsCount = Math.max(0, rtmpUrlStreamsCount - 1);
                 log.debug('[REMOVE ME] - Stop RTMP Stream From URL', rtmpUrlStreamsCount);
             }
         }
@@ -3933,14 +3946,13 @@ function startServer() {
     function encodeToken(token) {
         if (!token) return '';
 
-        const { username = 'username', password = 'password', presenter = false, expire } = token;
+        const { username = 'username', presenter = false, expire } = token;
 
         const expireValue = expire || jwtCfg.JWT_EXP;
 
-        // Constructing payload
+        // Constructing payload (never include passwords in tokens)
         const payload = {
             username: String(username),
-            password: String(password),
             presenter: String(presenter),
         };
 
@@ -4180,17 +4192,22 @@ function startServer() {
     }
 
     function getIP(req) {
-        const forwarded = req.headers['x-forwarded-for'] || req.headers['X-Forwarded-For'];
-        if (forwarded) {
-            return forwarded.split(',')[0].trim();
+        if (trustProxy) {
+            const forwarded = req.headers['x-forwarded-for'] || req.headers['X-Forwarded-For'];
+            if (forwarded) {
+                return forwarded.split(',')[0].trim();
+            }
         }
         return req.socket.remoteAddress || req.ip;
     }
 
     function getIpSocket(socket) {
-        const forwarded = socket.handshake.headers['x-forwarded-for'] || socket.handshake.headers['X-Forwarded-For'];
-        if (forwarded) {
-            return forwarded.split(',')[0].trim();
+        if (trustProxy) {
+            const forwarded =
+                socket.handshake.headers['x-forwarded-for'] || socket.handshake.headers['X-Forwarded-For'];
+            if (forwarded) {
+                return forwarded.split(',')[0].trim();
+            }
         }
         return socket.handshake.address;
     }
@@ -4215,7 +4232,7 @@ function startServer() {
             const ip = getIpSocket(socket);
             if (ip && allowedIP(ip)) {
                 authHost.deleteIP(ip);
-                hostCfg.authenticated = false;
+                updateHostAuthenticatedFlag();
                 log.debug('Remove IP from auth', {
                     removedIp: ip,
                     authorizedIps: authHost.getAuthorizedIPs(),

@@ -20,9 +20,7 @@ async function withFileLock(filePath, fn) {
         return await fn();
     } finally {
         release();
-        if (!mutex.isLocked()) {
-            fileLocks.delete(filePath); // Clean up when no one is waiting
-        }
+        // Do not delete mutex from map - TOCTOU race could allow concurrent access
     }
 }
 

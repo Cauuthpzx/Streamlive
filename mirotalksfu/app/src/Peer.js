@@ -22,7 +22,7 @@ module.exports = class Peer {
         } = peer_info;
 
         this.id = socket_id;
-        this.peer_info = peer_info;
+        this.peer_info = { ...peer_info };
         this.peer_uuid = peer_uuid;
         this.peer_name = peer_name;
         this.peer_avatar = peer_avatar;
@@ -103,7 +103,12 @@ module.exports = class Peer {
     }
 
     getTransports() {
-        return JSON.parse(JSON.stringify([...this.transports]));
+        return Array.from(this.transports.entries()).map(([id, t]) => ({
+            id,
+            closed: t.closed,
+            iceState: t.iceState,
+            dtlsState: t.dtlsState,
+        }));
     }
 
     getTransport(transport_id) {
@@ -152,7 +157,14 @@ module.exports = class Peer {
     // ####################################################
 
     getProducers() {
-        return JSON.parse(JSON.stringify([...this.producers]));
+        return Array.from(this.producers.entries()).map(([id, p]) => ({
+            id,
+            kind: p.kind,
+            type: p.type,
+            paused: p.paused,
+            closed: p.closed,
+            appData: p.appData,
+        }));
     }
 
     getProducer(producer_id) {
@@ -187,6 +199,7 @@ module.exports = class Peer {
             producer = await producerTransport.produce({
                 kind: producer_kind,
                 rtpParameters: producer_rtpParameters,
+                appData: { mediaType: producer_type },
             });
 
             this.addProducer(producer.id, producer);
@@ -205,12 +218,11 @@ module.exports = class Peer {
 
         const { id, appData, type, kind, rtpParameters } = producer;
 
-        appData.mediaType = producer_type;
-
         if (['simulcast', 'svc'].includes(type)) {
             const { scalabilityMode } = rtpParameters.encodings[0];
-            const spatialLayer = parseInt(scalabilityMode.substring(1, 2)); // 1/2/3
-            const temporalLayer = parseInt(scalabilityMode.substring(3, 4)); // 1/2/3
+            const match = scalabilityMode ? scalabilityMode.match(/^L(\d+)T(\d+)$/) : null;
+            const spatialLayer = match ? parseInt(match[1], 10) : 1;
+            const temporalLayer = match ? parseInt(match[2], 10) : 1;
 
             log.debug(`Producer [${type}-${kind}] ----->`, {
                 scalabilityMode,
@@ -267,7 +279,14 @@ module.exports = class Peer {
     // ####################################################
 
     getConsumers() {
-        return JSON.parse(JSON.stringify([...this.consumers]));
+        return Array.from(this.consumers.entries()).map(([id, c]) => ({
+            id,
+            kind: c.kind,
+            type: c.type,
+            paused: c.paused,
+            closed: c.closed,
+            producerId: c.producerId,
+        }));
     }
 
     getConsumer(consumer_id) {
@@ -325,8 +344,9 @@ module.exports = class Peer {
         if (['simulcast', 'svc'].includes(type)) {
             // simulcast - L1T3/L2T3/L3T3 | svc - L3T3
             const { scalabilityMode } = rtpParameters.encodings[0];
-            const spatialLayer = parseInt(scalabilityMode.substring(1, 2)); // 1/2/3
-            const temporalLayer = parseInt(scalabilityMode.substring(3, 4)); // 1/2/3
+            const match = scalabilityMode ? scalabilityMode.match(/^L(\d+)T(\d+)$/) : null;
+            const spatialLayer = match ? parseInt(match[1], 10) : 1;
+            const temporalLayer = match ? parseInt(match[2], 10) : 1;
 
             try {
                 await consumer.setPreferredLayers({
