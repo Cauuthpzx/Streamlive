@@ -66,6 +66,8 @@ module.exports = class Room {
         this.videoAIEnabled = config?.integrations?.videoAI?.enabled || false;
         this.peers = new Map();
         this.bannedPeers = new Set();
+        // Reverse index: producerId -> { peerId, peer_name } for O(1) speaker lookups
+        this._producerToPeer = new Map();
         this.webRtcTransport = config.mediasoup.webRtcTransport;
         this.router = null;
         this.routerSettings = config.mediasoup.router;
@@ -116,18 +118,31 @@ module.exports = class Room {
             thereIsPolls: this.thereIsPolls(),
             shareMediaData: this.shareMediaData,
             dominantSpeaker: this.activeSpeakerObserverEnabled,
-            peers: JSON.stringify(
-                Array.from(this.peers.values()).map((p) => ({
-                    id: p.id,
-                    peer_name: p.peer_name,
-                    peer_info: p.peer_info,
-                }))
-            ),
+            peers: this._getPeersSummary(),
             peersCount: this.getPeersCount(),
             maxParticipants: this.maxParticipants,
             maxParticipantsReached: this.peers.size >= this.maxParticipants,
             globalLobby: this.globalLobby,
         };
+    }
+
+    // Cache peers summary - invalidated on peer add/remove
+    _getPeersSummary() {
+        if (!this._peersSummaryCache || this._peersSummaryDirty) {
+            this._peersSummaryCache = JSON.stringify(
+                Array.from(this.peers.values()).map((p) => ({
+                    id: p.id,
+                    peer_name: p.peer_name,
+                    peer_info: p.peer_info,
+                })),
+            );
+            this._peersSummaryDirty = false;
+        }
+        return this._peersSummaryCache;
+    }
+
+    _invalidatePeersSummary() {
+        this._peersSummaryDirty = true;
     }
 
     // ##############################################
@@ -406,6 +421,8 @@ module.exports = class Room {
         this.closeActiveSpeakerObserver();
         if (this.isRtmpFileStreamerActive()) this.stopRTMP();
         if (this.isRtmpUrlStreamerActive()) this.stopRTMPfromURL();
+        this._producerToPeer.clear();
+        this._peersSummaryCache = null;
         this.closeRouter();
         log.debug('Room closed', { room_id: this.id });
     }
@@ -433,31 +450,25 @@ module.exports = class Room {
 
     sendActiveSpeakerVolume(volumes) {
         try {
-            if (!Array.isArray(volumes) || volumes.length === 0) {
-                return;
-            }
+            if (!Array.isArray(volumes) || volumes.length === 0) return;
 
-            if (Date.now() > this.audioLastUpdateTime + 100) {
-                this.audioLastUpdateTime = Date.now();
+            const now = Date.now();
+            if (now <= this.audioLastUpdateTime + 100) return;
+            this.audioLastUpdateTime = now;
 
-                const { producer, volume } = volumes[0];
-                const audioVolume = Math.round(Math.pow(10, volume / 70) * 10); // Scale volume to 1-10
+            const { producer, volume } = volumes[0];
+            const audioVolume = Math.round(Math.pow(10, volume / 70) * 10);
+            if (audioVolume <= 1) return;
 
-                if (audioVolume > 1) {
-                    this.peers.forEach((peer) => {
-                        const { id, peer_audio, peer_name } = peer;
-                        peer.producers.forEach((peerProducer) => {
-                            if (peerProducer.id === producer.id && peerProducer.kind === 'audio' && peer_audio) {
-                                const data = {
-                                    peer_id: id,
-                                    peer_name: peer_name,
-                                    audioVolume: audioVolume,
-                                };
-                                // log.debug('Sending audio volume', data);
-                                this.sendToAll('audioVolume', data);
-                                return;
-                            }
-                        });
+            // O(1) lookup via reverse index instead of O(N*P) nested loop
+            const peerMapping = this._producerToPeer.get(producer.id);
+            if (peerMapping) {
+                const peer = this.peers.get(peerMapping.peerId);
+                if (peer && peer.peer_audio) {
+                    this.sendToAll('audioVolume', {
+                        peer_id: peer.id,
+                        peer_name: peer.peer_name,
+                        audioVolume: audioVolume,
                     });
                 }
             }
@@ -489,38 +500,31 @@ module.exports = class Room {
         log.debug('Start activeSpeakerObserver for signaling dominant speaker...');
         this.activeSpeakerObserver = await this.router.createActiveSpeakerObserver();
         this.activeSpeakerObserver.on('dominantspeaker', (dominantSpeaker) => {
-            if (!dominantSpeaker.producer) {
-                return;
-            }
-            log.debug('activeSpeakerObserver "dominantspeaker" event', dominantSpeaker.producer.id);
-            this.peers.forEach((peer) => {
-                const { id, peer_audio, peer_name } = peer;
-                if (peer.producers instanceof Map) {
-                    for (const peerProducer of peer.producers.values()) {
-                        if (
-                            peerProducer.id === dominantSpeaker.producer.id &&
-                            peerProducer.kind === 'audio' &&
-                            peer_audio
-                        ) {
-                            let videoProducerId = null;
-                            for (const p of peer.producers.values()) {
-                                if (p.kind === 'video') {
-                                    videoProducerId = p.id;
-                                    break;
-                                }
-                            }
-                            const data = {
-                                producer_id: videoProducerId,
-                                peer_id: id,
-                                peer_name: peer_name,
-                            };
-                            log.debug('Sending dominant speaker', data);
-                            this.sendToAll('dominantSpeaker', data);
-                            break;
-                        }
-                    }
+            if (!dominantSpeaker.producer) return;
+
+            // O(1) lookup via reverse index instead of O(N*P) nested loop
+            const peerMapping = this._producerToPeer.get(dominantSpeaker.producer.id);
+            if (!peerMapping) return;
+
+            const peer = this.peers.get(peerMapping.peerId);
+            if (!peer || !peer.peer_audio) return;
+
+            // Find video producer for this peer
+            let videoProducerId = null;
+            for (const p of peer.producers.values()) {
+                if (p.kind === 'video') {
+                    videoProducerId = p.id;
+                    break;
                 }
-            });
+            }
+
+            const data = {
+                producer_id: videoProducerId,
+                peer_id: peer.id,
+                peer_name: peer.peer_name,
+            };
+            log.debug('Sending dominant speaker', data);
+            this.sendToAll('dominantSpeaker', data);
         });
     }
 
@@ -606,10 +610,16 @@ module.exports = class Room {
 
     addPeer(peer) {
         this.peers.set(peer.id, peer);
+        this._invalidatePeersSummary();
     }
 
     delPeer(peer) {
+        // Clean up producer reverse index for this peer
+        for (const [producerId] of peer.producers) {
+            this._producerToPeer.delete(producerId);
+        }
         this.peers.delete(peer.id);
+        this._invalidatePeersSummary();
     }
 
     getPeer(socket_id) {
@@ -759,28 +769,41 @@ module.exports = class Room {
             log.debug('---> transport close [id:%s]', transport.id);
         });
 
+        // Track ICE disconnect timer to prevent memory leaks from lingering closures
+        let iceDisconnectTimer = null;
+
         transport.on('icestatechange', (iceState) => {
             const iceLog = {
                 peer_name: peer_name,
                 transport_id: id,
                 iceState: iceState,
             };
-            log.debug('ICE state changed', iceLog);
 
             if (iceState === 'disconnected') {
-                log.debug('ICE state disconnected for transport waiting before closing', iceLog);
-                setTimeout(() => {
-                    if (transport.iceState === 'disconnected') {
+                log.debug('ICE state disconnected, scheduling close', iceLog);
+                // Clear any existing timer before setting new one
+                if (iceDisconnectTimer) clearTimeout(iceDisconnectTimer);
+                iceDisconnectTimer = setTimeout(() => {
+                    iceDisconnectTimer = null;
+                    if (transport.iceState === 'disconnected' && !transport.closed) {
                         log.warn('Closing transport due to prolonged ICE disconnection', iceLog);
-                        if (!transport.closed) {
-                            transport.close();
-                        }
+                        transport.close();
                     }
-                }, iceConsentTimeout * 1000); // Wait iceConsentTimeout seconds before closing
+                }, iceConsentTimeout * 1000);
             } else if (iceState === 'closed') {
+                if (iceDisconnectTimer) {
+                    clearTimeout(iceDisconnectTimer);
+                    iceDisconnectTimer = null;
+                }
                 log.warn('ICE state closed, closing transport', iceLog);
                 if (!transport.closed) {
                     transport.close();
+                }
+            } else if (iceState === 'connected' || iceState === 'completed') {
+                // ICE recovered - cancel pending close timer
+                if (iceDisconnectTimer) {
+                    clearTimeout(iceDisconnectTimer);
+                    iceDisconnectTimer = null;
                 }
             }
         });
@@ -895,6 +918,9 @@ module.exports = class Room {
 
         const { id } = peerProducer;
 
+        // Maintain reverse index for O(1) speaker lookups
+        this._producerToPeer.set(id, { peerId: socket_id, peer_name: peer_name });
+
         const producerTransport = peer.getTransport(producerTransportId);
 
         if (!producerTransport) {
@@ -933,6 +959,7 @@ module.exports = class Room {
 
         try {
             peer.closeProducer(producer_id);
+            this._producerToPeer.delete(producer_id);
         } catch (error) {
             log.error(`Error closing producer for peer ${socket_id}`, error);
             throw new Error(`Error closing producer with ID ${producer_id} for peer ${socket_id}`);
@@ -1086,8 +1113,11 @@ module.exports = class Room {
     // ####################################################
 
     broadCast(socket_id, action, data) {
-        for (let otherID of Array.from(this.peers.keys()).filter((id) => id !== socket_id)) {
-            this.send(otherID, action, data);
+        // Direct iteration without array allocation (was: Array.from().filter())
+        for (const otherID of this.peers.keys()) {
+            if (otherID !== socket_id) {
+                this.send(otherID, action, data);
+            }
         }
     }
 
@@ -1098,7 +1128,8 @@ module.exports = class Room {
     }
 
     sendToAll(action, data) {
-        for (let peer_id of Array.from(this.peers.keys())) {
+        // Direct iteration without array allocation (was: Array.from().keys())
+        for (const peer_id of this.peers.keys()) {
             this.send(peer_id, action, data);
         }
     }

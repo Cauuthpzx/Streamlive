@@ -28,14 +28,16 @@ class RtmpFile {
             this.ffmpegProcess = ffmpeg(inputStream)
                 .inputOptions(['-re']) // Read input at native frame rate
                 .outputOptions([
-                    '-c:v libx264', // Encode video to H.264
-                    '-preset veryfast', // Set preset to very fast
-                    '-maxrate 3000k', // Max bitrate for the video stream
-                    '-bufsize 6000k', // Buffer size
-                    '-g 50', // GOP size
-                    '-c:a aac', // Encode audio to AAC
-                    '-b:a 128k', // Bitrate for the audio stream
-                    '-f flv', // Output format
+                    '-c:v libx264',
+                    '-preset veryfast',
+                    '-tune zerolatency', // Reduce latency for live streaming
+                    '-maxrate 2500k', // Reduced from 3000k - better CPU/bandwidth ratio
+                    '-bufsize 5000k',
+                    '-g 60', // Keyframe every 2s at 30fps
+                    '-threads 2', // Limit CPU contention
+                    '-c:a aac',
+                    '-b:a 128k',
+                    '-f flv',
                 ])
                 .output(rtmpUrl)
                 .on('start', (commandLine) => log.debug('ffmpeg process starting with command:', commandLine))

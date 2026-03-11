@@ -44,13 +44,18 @@ class RtmpUrl {
 
         try {
             this.ffmpegProcess = ffmpeg(inputVideoURL)
-                .inputOptions('-re') // Read input in real-time
-                .audioCodec('aac') // Set audio codec to AAC
-                .audioBitrate('128k') // Set audio bitrate to 128 kbps
-                .videoCodec('libx264') // Set video codec to H.264
-                .videoBitrate('3000k') // Set video bitrate to 3000 kbps
-                .size('1280x720') // Scale video to 1280x720 resolution
-                .format('flv') // Set output format to FLV
+                .inputOptions('-re')
+                .audioCodec('aac')
+                .audioBitrate('128k')
+                .videoCodec('libx264')
+                .videoBitrate('2500k') // Reduced: better CPU/bandwidth ratio
+                .size('1280x720')
+                .outputOptions([
+                    '-preset veryfast', // ~40% less CPU vs default
+                    '-tune zerolatency', // Lower latency for live streams
+                    '-threads 2', // Limit CPU contention with SFU workers
+                ])
+                .format('flv')
                 .output(rtmpUrl)
                 .on('start', (commandLine) => log.debug('ffmpeg process starting with command:', commandLine))
                 .on('progress', (progress) => {

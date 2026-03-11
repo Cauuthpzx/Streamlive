@@ -424,6 +424,8 @@ class RoomClient {
         this.producers = new Map();
         this.producerLabel = new Map();
         this.eventListeners = new Map();
+        // Reverse index: producerId -> consumerId for O(1) lookups
+        this._producerToConsumer = new Map();
 
         this.debug = false;
         this.debug ? window.localStorage.setItem('debug', 'mediasoup*') : window.localStorage.removeItem('debug');
@@ -2573,8 +2575,13 @@ class RoomClient {
     }
 
     getConsumerIdByProducerId(producerId) {
+        // O(1) lookup via reverse index (was O(n) linear scan)
+        const cached = this._producerToConsumer.get(producerId);
+        if (cached && this.consumers.has(cached)) return cached;
+        // Fallback: rebuild for this producerId
         for (let [consumerId, consumer] of this.consumers.entries()) {
             if (consumer._producerId === producerId) {
+                this._producerToConsumer.set(producerId, consumerId);
                 return consumerId;
             }
         }
@@ -3042,6 +3049,7 @@ class RoomClient {
             console.log('CONSUMER', consumer);
 
             this.consumers.set(consumer.id, consumer);
+            this._producerToConsumer.set(consumer._producerId, consumer.id);
 
             await this.handleConsumer(consumer.id, type, stream, peer_name, peer_info);
 
@@ -3445,7 +3453,11 @@ class RoomClient {
             }
         }
 
-        this.consumers.get(consumer_id).close();
+        const consumer = this.consumers.get(consumer_id);
+        if (consumer) {
+            this._producerToConsumer.delete(consumer._producerId);
+            consumer.close();
+        }
         this.consumers.delete(consumer_id);
         this.sound('left');
     }

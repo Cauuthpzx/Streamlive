@@ -168,6 +168,11 @@ const io = socketIo(server, {
     maxHttpBufferSize: 1e7,
     transports: ['websocket'],
     cors: corsOptions,
+    // Performance: reduce per-message overhead
+    perMessageDeflate: false, // Disable compression (CPU savings > bandwidth savings for LAN/fast networks)
+    httpCompression: false,
+    pingInterval: 25000, // Default 25s - balanced keep-alive
+    pingTimeout: 20000, // Default 20s - detect dead connections faster
 });
 
 const host = config?.server?.hostUrl || `http://localhost:${config?.server?.listen?.port || 3010}`;
@@ -2220,10 +2225,29 @@ function startServer() {
         }
     }
 
+    // Load-aware worker selection: picks worker with fewest active routers
+    // Falls back to round-robin if resource usage can't be determined
     async function getMediasoupWorker() {
-        const worker = workers[nextMediasoupWorkerIdx];
-        if (++nextMediasoupWorkerIdx === workers.length) nextMediasoupWorkerIdx = 0;
-        return worker;
+        if (workers.length === 1) return workers[0];
+
+        try {
+            let bestWorker = workers[0];
+            let minLoad = Infinity;
+            for (const worker of workers) {
+                // Use router count as lightweight load proxy (no async call needed)
+                const routerCount = worker.appData?.routerCount || 0;
+                if (routerCount < minLoad) {
+                    minLoad = routerCount;
+                    bestWorker = worker;
+                }
+            }
+            return bestWorker;
+        } catch {
+            // Fallback to round-robin
+            const worker = workers[nextMediasoupWorkerIdx];
+            if (++nextMediasoupWorkerIdx === workers.length) nextMediasoupWorkerIdx = 0;
+            return worker;
+        }
     }
 
     // ####################################################
@@ -2260,6 +2284,7 @@ function startServer() {
             } else {
                 log.debug('Created room', { room_id: socket.room_id });
                 const worker = await getMediasoupWorker();
+                worker.appData.routerCount = (worker.appData.routerCount || 0) + 1;
                 roomList.set(socket.room_id, new Room(socket.room_id, worker, io));
                 callback({ room_id: socket.room_id });
             }
@@ -4021,6 +4046,11 @@ function startServer() {
                 //
                 stopRTMPActiveStreams(isPresenter, room);
 
+                // Decrement worker router count for load balancing
+                if (room.worker && room.worker.appData) {
+                    room.worker.appData.routerCount = Math.max(0, (room.worker.appData.routerCount || 1) - 1);
+                }
+
                 roomList.delete(socket.room_id);
 
                 delete presenters[socket.room_id];
@@ -4079,6 +4109,11 @@ function startServer() {
             if (room.getPeersCount() === 0) {
                 //
                 stopRTMPActiveStreams(isPresenter, room);
+
+                // Decrement worker router count for load balancing
+                if (room.worker && room.worker.appData) {
+                    room.worker.appData.routerCount = Math.max(0, (room.worker.appData.routerCount || 1) - 1);
+                }
 
                 roomList.delete(socket.room_id);
 

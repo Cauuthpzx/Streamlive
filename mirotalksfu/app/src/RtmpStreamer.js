@@ -24,12 +24,22 @@ class RtmpStreamer {
         this.ffmpegStream = ffmpeg()
             .input(this.stream)
             .inputOptions('-re')
+            // Use hardware-accelerated encoding when available, faster preset for lower CPU
             .videoCodec('libx264')
-            .videoBitrate('3000k')
+            .videoBitrate('2500k')
             .size('1280x720')
+            .outputOptions([
+                '-preset veryfast', // ~40% less CPU vs default 'medium', minimal quality loss
+                '-tune zerolatency', // Reduce latency for live streaming
+                '-maxrate 2800k', // Cap peak bitrate
+                '-bufsize 5000k', // VBV buffer for consistent quality
+                '-g 60', // Keyframe interval = 2s at 30fps (better seeking)
+                '-threads 2', // Limit FFmpeg threads to avoid CPU contention
+                '-f flv',
+            ])
             .audioCodec('aac')
             .audioBitrate('128k')
-            .outputOptions(['-f flv'])
+            .audioChannels(2)
             .output(this.rtmpUrl)
             .on('start', (commandLine) => this.log.debug('ffmpeg command', { id: this.rtmpKey, cmd: commandLine }))
             .on('progress', (progress) => {

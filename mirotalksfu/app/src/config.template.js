@@ -44,7 +44,8 @@ const IPv4 = getIPv4();
 const RTC_MIN_PORT = parseInt(process.env.SFU_MIN_PORT) || 40000;
 const RTC_MAX_PORT = parseInt(process.env.SFU_MAX_PORT) || 40100;
 const NUM_CPUS = os.cpus().length;
-const NUM_WORKERS = Math.min(process.env.SFU_NUM_WORKERS || NUM_CPUS, NUM_CPUS);
+// Cap workers: diminishing returns beyond 8, excessive context switching overhead
+const NUM_WORKERS = Math.min(process.env.SFU_NUM_WORKERS || NUM_CPUS, NUM_CPUS, 8);
 
 // ==============================================
 // 3. FFmpeg Path Configuration
@@ -1512,21 +1513,25 @@ module.exports = {
             // Logging level (error, warn, debug, etc.)
             logLevel: process.env.MEDIASOUP_LOG_LEVEL || 'error',
 
-            // Detailed logging for specific components:
-            logTags: [
-                'info', // General information
-                'ice', // ICE (Interactive Connectivity Establishment) events
-                'dtls', // DTLS handshake and encryption
-                'rtp', // RTP packet flow
-                'srtp', // Secure RTP encryption
-                'rtcp', // RTCP control protocol
-                'rtx', // Retransmissions
-                'bwe', // Bandwidth estimation
-                'score', // Network score calculations
-                'simulcast', // Simulcast layers
-                'svc', // Scalable Video Coding
-                'sctp', // SCTP data channels
-            ],
+            // Detailed logging - production: minimal tags to reduce I/O overhead
+            // Full tags: 'info','ice','dtls','rtp','srtp','rtcp','rtx','bwe','score','simulcast','svc','sctp'
+            logTags:
+                ENVIRONMENT === 'production'
+                    ? ['info', 'ice', 'bwe']
+                    : [
+                          'info',
+                          'ice',
+                          'dtls',
+                          'rtp',
+                          'srtp',
+                          'rtcp',
+                          'rtx',
+                          'bwe',
+                          'score',
+                          'simulcast',
+                          'svc',
+                          'sctp',
+                      ],
         },
         numWorkers: NUM_WORKERS, // Number of mediasoup worker processes to create
 
@@ -1562,49 +1567,38 @@ module.exports = {
                 {
                     kind: 'video',
                     mimeType: 'video/VP8',
-                    clockRate: 90000, // Standard video clock rate
+                    clockRate: 90000,
                     parameters: {
-                        'x-google-start-bitrate': 1000, // Initial bitrate (kbps)
+                        'x-google-start-bitrate': 800, // Conservative start for faster ramp-up
                     },
                 },
 
-                // VP9 video codec (better compression than VP8)
+                // VP9 video codec (better compression than VP8, ~30% bitrate savings)
                 // Profile 0: Most widely supported VP9 profile
                 {
                     kind: 'video',
                     mimeType: 'video/VP9',
                     clockRate: 90000,
                     parameters: {
-                        'profile-id': 0, // Baseline profile
-                        'x-google-start-bitrate': 1000,
+                        'profile-id': 0,
+                        'x-google-start-bitrate': 800,
                     },
                 },
 
-                // VP9 Profile 2: Supports HDR and 10/12-bit color
-                {
-                    kind: 'video',
-                    mimeType: 'video/VP9',
-                    clockRate: 90000,
-                    parameters: {
-                        'profile-id': 2, // Advanced profile
-                        'x-google-start-bitrate': 1000,
-                    },
-                },
-
-                // H.264 Baseline profile (widest hardware support)
+                // H.264 Baseline profile (widest hardware support, GPU-accelerated)
                 {
                     kind: 'video',
                     mimeType: 'video/h264',
                     clockRate: 90000,
                     parameters: {
-                        'packetization-mode': 1, // Required for WebRTC
+                        'packetization-mode': 1,
                         'profile-level-id': '42e01f', // Baseline 3.1
-                        'level-asymmetry-allowed': 1, // Allows different levels
+                        'level-asymmetry-allowed': 1,
                         'x-google-start-bitrate': 1000,
                     },
                 },
 
-                // H.264 Main profile (better compression than Baseline)
+                // H.264 Main profile (better compression, ~15% savings over Baseline)
                 {
                     kind: 'video',
                     mimeType: 'video/h264',
@@ -1613,7 +1607,7 @@ module.exports = {
                         'packetization-mode': 1,
                         'profile-level-id': '4d0032', // Main 4.0
                         'level-asymmetry-allowed': 1,
-                        'x-google-start-bitrate': 1000,
+                        'x-google-start-bitrate': 1200,
                     },
                 },
             ],
@@ -1736,17 +1730,16 @@ module.exports = {
              * - These values should be tuned based on Node resources
              * - Consider network plugin overhead (Calico, Cilium etc.)
              */
-            initialAvailableOutgoingBitrate: 2500000, // 2.5 Mbps initial bitrate
-            minimumAvailableOutgoingBitrate: 1000000, // 1 Mbps minimum guaranteed
-            maxIncomingBitrate: 3000000, // 3 Mbps max per producer
+            initialAvailableOutgoingBitrate: 3000000, // 3 Mbps initial bitrate (faster quality ramp)
+            minimumAvailableOutgoingBitrate: 600000, // 600 Kbps minimum (better weak-network resilience)
+            maxIncomingBitrate: 4000000, // 4 Mbps max per producer (supports FHD streams)
 
             /**
              * Data Channel Settings
-             * Kubernetes implications:
-             * - Affects memory allocation per transport
-             * - Larger sizes may require Pod resource adjustments
+             * Reduced from 256KB to 64KB - sufficient for chat/signaling,
+             * saves ~190KB memory per transport (significant at scale)
              */
-            maxSctpMessageSize: 262144, // 256 KB max message size for data channels
+            maxSctpMessageSize: 65536, // 64 KB max message size for data channels
         },
     },
 };
