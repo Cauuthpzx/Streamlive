@@ -626,7 +626,13 @@ function startServer() {
 
     // UI buttons configuration
     app.get('/config', (req, res) => {
-        res.status(200).json({ message: config?.ui?.buttons || false });
+        const livekitCfg = config.livekit || {};
+        const engine = livekitCfg.enabled && livekitCfg.engine === 'livekit' ? 'livekit' : 'mediasoup';
+        res.status(200).json({
+            message: config?.ui?.buttons || false,
+            engine: engine,
+            livekitHost: engine === 'livekit' ? livekitCfg.host : undefined,
+        });
     });
 
     // Brand configuration

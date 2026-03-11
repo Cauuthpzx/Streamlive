@@ -1186,6 +1186,11 @@ async function whoAreYou() {
                 clientButtons: BUTTONS,
             });
         }
+
+        // Capture media engine type from server config
+        window._streamliveEngine = response.data.engine || 'mediasoup';
+        window._streamliveLiveKitHost = response.data.livekitHost || '';
+        console.log('04 ----> Media engine:', window._streamliveEngine);
     } catch (error) {
         console.error('04 ----> AXIOS GET CONFIG ERROR', error.message);
     }
@@ -1665,12 +1670,19 @@ function joinRoom(peer_name, room_id) {
         roomId.innerText = room_id;
         userName.innerText = peer_name;
         isUserPresenter.innerText = isPresenter;
+
+        // Engine selection: pass LiveKit adapter when engine is 'livekit'
+        const engine = window._streamliveEngine || 'mediasoup';
+        const mediaClient = window.mediasoupClient;
+
+        console.log('05 ----> Using media engine:', engine);
+
         rc = new RoomClient(
             localAudio,
             remoteAudios,
             videoMediaContainer,
             videoPinMediaContainer,
-            window.mediasoupClient,
+            mediaClient,
             socket,
             room_id,
             peer_name,
@@ -1682,7 +1694,9 @@ function joinRoom(peer_name, room_id) {
             joinRoomWithScreen,
             isSpeechSynthesisSupported,
             transcription,
-            roomIsReady
+            roomIsReady,
+            engine, // NEW: engine type ('mediasoup' or 'livekit')
+            window._streamliveLiveKitHost // NEW: LiveKit server URL
         );
         handleRoomClientEvents();
     }

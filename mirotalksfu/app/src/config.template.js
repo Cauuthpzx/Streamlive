@@ -1483,6 +1483,12 @@ module.exports = {
         // Enable LiveKit integration (default: false)
         enabled: process.env.LIVEKIT_ENABLED === 'true' || false,
 
+        // Media engine for new rooms: 'mediasoup' (default) or 'livekit'
+        // When 'livekit': client uses LiveKit SDK for WebRTC media
+        // When 'mediasoup': client uses mediasoup-client (default behavior)
+        // Both engines share the same Socket.io signaling for chat/commands
+        engine: process.env.LIVEKIT_ENGINE || 'mediasoup',
+
         // LiveKit server WebSocket URL
         // For local development: ws://localhost:7880
         // For production: wss://your-livekit-server.com

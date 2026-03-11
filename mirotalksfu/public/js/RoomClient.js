@@ -224,7 +224,9 @@ class RoomClient {
         joinRoomWithScreen,
         isSpeechSynthesisSupported,
         transcription,
-        successCallback
+        successCallback,
+        engine = 'mediasoup', // 'mediasoup' or 'livekit'
+        livekitHost = ''
     ) {
         this.room_id = room_id;
         this.peer_id = socket.id;
@@ -232,6 +234,12 @@ class RoomClient {
         this.peer_uuid = peer_uuid;
         this.peer_info = peer_info;
         this.peer_avatar = peer_info.peer_avatar;
+
+        // Media engine: 'mediasoup' (default) or 'livekit'
+        this.engine = engine;
+        this.livekitHost = livekitHost;
+        this.livekitAdapter = null; // Initialized when engine === 'livekit'
+        this.isLiveKit = engine === 'livekit';
 
         // Device type
         this.isDesktopDevice = peer_info.is_desktop_device;
@@ -583,13 +591,26 @@ class RoomClient {
     async joinAllowed(room) {
         console.log('07 ----> Join Room allowed');
 
+        // Override engine from server response if provided
+        if (room.engine) {
+            this.engine = room.engine;
+            this.isLiveKit = room.engine === 'livekit';
+            if (room.livekitHost) this.livekitHost = room.livekitHost;
+        }
+
         await this.handleRoomInfo(room);
 
-        await this.loadDeviceAndInitTransports();
+        if (this.isLiveKit) {
+            // LiveKit path: connect via LiveKit SDK instead of mediasoup transports
+            await this.initLiveKitConnection();
+        } else {
+            // Mediasoup path: standard device + transport setup
+            await this.loadDeviceAndInitTransports();
 
-        // ###############################################
-        this.socket.emit('getProducers'); // newProducers
-        // ###############################################
+            // ###############################################
+            this.socket.emit('getProducers'); // newProducers
+            // ###############################################
+        }
 
         if (isBroadcastingEnabled) {
             isPresenter ? await this.startLocalMedia() : this.handleRoomBroadcasting();
@@ -611,6 +632,105 @@ class RoomClient {
 
         // Init Send/Receive Transports
         await this.initTransports(this.device);
+    }
+
+    // ####################################################
+    // LIVEKIT CONNECTION
+    // ####################################################
+
+    async initLiveKitConnection() {
+        console.log('07.2 ----> Initializing LiveKit connection', {
+            host: this.livekitHost,
+            room: this.room_id,
+            peer: this.peer_name,
+        });
+
+        try {
+            // Request LiveKit token from server via Socket.io
+            const tokenData = await this.socket.request('getLiveKitToken', {
+                identity: this.peer_name,
+                room: this.room_id,
+            });
+
+            if (!tokenData || !tokenData.token) {
+                throw new Error('Failed to get LiveKit token from server');
+            }
+
+            console.log('07.2 ----> LiveKit token received');
+
+            // Check if LiveKitAdapter and LiveKit client SDK are available
+            if (typeof LiveKitAdapter === 'undefined') {
+                throw new Error('LiveKitAdapter not loaded. Check Room.html script includes.');
+            }
+            if (typeof LivekitClient === 'undefined' && typeof window.LivekitClient === 'undefined') {
+                throw new Error('LiveKit client SDK not loaded. Check CDN script in Room.html.');
+            }
+
+            // Create LiveKit adapter with event callbacks
+            this.livekitAdapter = new LiveKitAdapter({
+                livekitHost: this.livekitHost,
+                onTrackSubscribed: (track, publication, participant) => {
+                    console.log('LiveKit: track subscribed', {
+                        kind: track.kind,
+                        participant: participant.identity,
+                    });
+                    const element = track.attach();
+                    element.id = `lk_${participant.sid}_${track.sid}`;
+                    if (track.kind === 'video') {
+                        this.videoMediaContainer.appendChild(element);
+                    } else if (track.kind === 'audio') {
+                        this.remoteAudioEl.appendChild(element);
+                    }
+                },
+                onTrackUnsubscribed: (track, publication, participant) => {
+                    console.log('LiveKit: track unsubscribed', {
+                        kind: track.kind,
+                        participant: participant.identity,
+                    });
+                    track.detach().forEach((el) => el.remove());
+                },
+                onParticipantConnected: (participant) => {
+                    console.log('LiveKit: participant joined', participant.identity);
+                    this.sound('joined');
+                },
+                onParticipantDisconnected: (participant) => {
+                    console.log('LiveKit: participant left', participant.identity);
+                    this.sound('left');
+                },
+                onActiveSpeakerChanged: (speakers) => {
+                    // Could wire into existing audio volume UI
+                },
+                onDisconnected: () => {
+                    console.warn('LiveKit: disconnected from room');
+                },
+                onReconnecting: () => {
+                    console.warn('LiveKit: reconnecting...');
+                },
+                onReconnected: () => {
+                    console.log('LiveKit: reconnected');
+                },
+                onDataReceived: (payload, participant) => {
+                    try {
+                        const message = new TextDecoder().decode(payload);
+                        console.log('LiveKit: data received', { from: participant?.identity, message });
+                    } catch (e) {
+                        console.error('LiveKit: error decoding data', e);
+                    }
+                },
+            });
+
+            // Connect to LiveKit room
+            await this.livekitAdapter.connect(this.room_id, tokenData.token);
+
+            console.log('07.2 ----> LiveKit connected successfully to room:', this.room_id);
+        } catch (error) {
+            console.error('07.2 ----> LiveKit connection failed, falling back to mediasoup', error.message);
+            // Fallback: use mediasoup if LiveKit fails
+            this.isLiveKit = false;
+            this.engine = 'mediasoup';
+            await this.loadDeviceAndInitTransports();
+            this.socket.emit('getProducers');
+        }
     }
 
     async handleRoomInfo(room) {
@@ -1679,6 +1799,38 @@ class RoomClient {
 
     async startLocalMedia() {
         console.log('08 ----> START LOCAL MEDIA...');
+
+        // LiveKit path: use adapter for publishing
+        if (this.isLiveKit && this.livekitAdapter) {
+            console.log('08 ----> START LOCAL MEDIA via LiveKit');
+            try {
+                if (this.isAudioAllowed) {
+                    await this.livekitAdapter.publishMicrophone();
+                    console.log('09 ----> START AUDIO MEDIA (LiveKit)');
+                    if (this._moderator.audio_start_muted) {
+                        await this.livekitAdapter.muteAudio();
+                    }
+                } else {
+                    setColor(startAudioButton, 'red');
+                }
+                if (this.isVideoAllowed && !this._moderator.video_start_hidden) {
+                    await this.livekitAdapter.publishCamera();
+                    console.log('10 ----> START VIDEO MEDIA (LiveKit)');
+                } else {
+                    setColor(startVideoButton, 'red');
+                    this.setVideoOff(this.peer_info, false);
+                    this.sendVideoOff();
+                    if (BUTTONS.main.startVideoButton) this.event(_EVENTS.stopVideo);
+                    this.updatePeerInfo(this.peer_name, this.peer_id, 'video', false);
+                    console.log('10 ----> VIDEO IS OFF (LiveKit)');
+                }
+            } catch (error) {
+                console.error('08 ----> LiveKit startLocalMedia error', error.message);
+            }
+            return;
+        }
+
+        // Mediasoup path (default)
         const audioProducerExist = this.producerExist(mediaType.audio);
         if (this.isAudioAllowed) {
             if (!audioProducerExist) {
