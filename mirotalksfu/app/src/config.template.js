@@ -1483,10 +1483,16 @@ module.exports = {
         // Enable LiveKit integration (default: false)
         enabled: process.env.LIVEKIT_ENABLED === 'true' || false,
 
-        // Media engine for new rooms: 'mediasoup' (default) or 'livekit'
-        // When 'livekit': client uses LiveKit SDK for WebRTC media
-        // When 'mediasoup': client uses mediasoup-client (default behavior)
-        // Both engines share the same Socket.io signaling for chat/commands
+        // Media engine for new rooms: 'mediasoup' | 'livekit' | 'hybrid'
+        //
+        // 'mediasoup' - client uses mediasoup-client for WebRTC media (default)
+        // 'livekit'   - client uses LiveKit SDK for WebRTC media
+        // 'hybrid'    - Mediasoup handles WebRTC media (low-latency C++ SFU) while
+        //               LiveKit runs in parallel for server-side recording (Egress),
+        //               RTMP ingress, RTMP streaming out, and horizontal scaling.
+        //               Both engines active simultaneously — each doing what it's best at.
+        //
+        // All modes share Socket.io signaling for chat/commands
         engine: process.env.LIVEKIT_ENGINE || 'mediasoup',
 
         // LiveKit server WebSocket URL

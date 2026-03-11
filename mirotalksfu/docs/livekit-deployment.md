@@ -77,10 +77,24 @@ keys:
 
 ```bash
 LIVEKIT_ENABLED=true
+LIVEKIT_ENGINE=hybrid                     # 'mediasoup' | 'livekit' | 'hybrid'
 LIVEKIT_HOST=ws://localhost:7880          # or wss://your-domain.com for production
 LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
 ```
+
+### Engine Modes
+
+| Mode | WebRTC Media | Recording | RTMP In/Out | Best For |
+|------|-------------|-----------|-------------|----------|
+| `mediasoup` | Mediasoup (C++ SFU) | Client-side FFmpeg | nginx-rtmp | Simple deployments |
+| `livekit` | LiveKit (Go SFU) | LiveKit Egress | LiveKit Ingress/Egress | LiveKit-native apps |
+| `hybrid` | Mediasoup (C++ SFU) | LiveKit Egress | LiveKit Ingress/Egress | **Best of both** |
+
+**Hybrid mode** (recommended) runs both engines simultaneously:
+- **Mediasoup** handles primary WebRTC media — lowest latency, efficient C++ SFU
+- **LiveKit** runs in parallel for server-side recording (Egress), RTMP ingress from OBS/encoders, RTMP streaming to YouTube/Twitch, and horizontal scaling
+- Both engines active at the same time, each contributing what it does best
 
 ### Step 4: Production Settings
 

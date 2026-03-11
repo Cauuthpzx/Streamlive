@@ -235,11 +235,15 @@ class RoomClient {
         this.peer_info = peer_info;
         this.peer_avatar = peer_info.peer_avatar;
 
-        // Media engine: 'mediasoup' (default) or 'livekit'
+        // Media engine: 'mediasoup' (default), 'livekit', or 'hybrid'
+        // hybrid = Mediasoup for WebRTC media + LiveKit for recording/ingress/RTMP
         this.engine = engine;
         this.livekitHost = livekitHost;
         this.livekitAdapter = null; // Initialized when engine === 'livekit'
         this.isLiveKit = engine === 'livekit';
+        this.isHybrid = engine === 'hybrid';
+        this.livekitEnabled = engine === 'livekit' || engine === 'hybrid';
+        this._hybridEgressId = null; // Active LiveKit Egress recording ID (hybrid mode)
 
         // Device type
         this.isDesktopDevice = peer_info.is_desktop_device;
@@ -595,21 +599,29 @@ class RoomClient {
         if (room.engine) {
             this.engine = room.engine;
             this.isLiveKit = room.engine === 'livekit';
+            this.isHybrid = room.engine === 'hybrid';
+            this.livekitEnabled = room.engine === 'livekit' || room.engine === 'hybrid';
             if (room.livekitHost) this.livekitHost = room.livekitHost;
         }
 
         await this.handleRoomInfo(room);
 
         if (this.isLiveKit) {
-            // LiveKit path: connect via LiveKit SDK instead of mediasoup transports
+            // LiveKit-only path: connect via LiveKit SDK for WebRTC media
             await this.initLiveKitConnection();
         } else {
-            // Mediasoup path: standard device + transport setup
+            // Mediasoup path (also used by hybrid mode for WebRTC media)
             await this.loadDeviceAndInitTransports();
 
             // ###############################################
             this.socket.emit('getProducers'); // newProducers
             // ###############################################
+
+            if (this.isHybrid) {
+                // Hybrid: Mediasoup handles media, LiveKit services available in parallel
+                console.log('07.5 ----> Hybrid mode: Mediasoup media + LiveKit services (recording, ingress, RTMP)');
+                this._initHybridServices();
+            }
         }
 
         if (isBroadcastingEnabled) {
@@ -730,6 +742,99 @@ class RoomClient {
             this.engine = 'mediasoup';
             await this.loadDeviceAndInitTransports();
             this.socket.emit('getProducers');
+        }
+    }
+
+    // ####################################################
+    // HYBRID MODE: LiveKit services alongside Mediasoup
+    // ####################################################
+
+    async _initHybridServices() {
+        // Query LiveKit service status in hybrid mode
+        try {
+            const status = await this.socket.request('hybridGetStatus', {});
+            if (status && status.enabled) {
+                console.log('07.5 ----> Hybrid services available:', status.services);
+                this._hybridServices = status.services;
+            } else {
+                console.warn('07.5 ----> Hybrid mode enabled but LiveKit services unavailable');
+                this._hybridServices = null;
+            }
+        } catch (error) {
+            console.error('07.5 ----> Hybrid services check failed', error.message);
+            this._hybridServices = null;
+        }
+    }
+
+    // Start recording via LiveKit Egress (hybrid mode)
+    // Uses LiveKit's server-side recording instead of client-side FFmpeg
+    async hybridStartRecording(layout) {
+        if (!this.isHybrid) return { error: 'Not in hybrid mode' };
+        try {
+            const result = await this.socket.request('hybridStartRecording', {
+                room_id: this.room_id,
+                layout: layout || 'speaker',
+            });
+            if (result.egressId) {
+                this._hybridEgressId = result.egressId;
+                console.log('Hybrid: recording started via LiveKit Egress', result.egressId);
+            }
+            return result;
+        } catch (error) {
+            console.error('Hybrid: recording start failed', error.message);
+            return { error: error.message };
+        }
+    }
+
+    // Stop recording via LiveKit Egress (hybrid mode)
+    async hybridStopRecording() {
+        if (!this.isHybrid) return { error: 'Not in hybrid mode' };
+        try {
+            const result = await this.socket.request('hybridStopRecording', {
+                egressId: this._hybridEgressId,
+                room_id: this.room_id,
+            });
+            this._hybridEgressId = null;
+            console.log('Hybrid: recording stopped');
+            return result;
+        } catch (error) {
+            console.error('Hybrid: recording stop failed', error.message);
+            return { error: error.message };
+        }
+    }
+
+    // Start RTMP stream via LiveKit Egress (hybrid mode)
+    async hybridStartRtmp(rtmpUrl, layout) {
+        if (!this.isHybrid) return { error: 'Not in hybrid mode' };
+        try {
+            const result = await this.socket.request('hybridStartRtmp', {
+                room_id: this.room_id,
+                rtmpUrl,
+                layout: layout || 'speaker',
+            });
+            console.log('Hybrid: RTMP stream started via LiveKit', result);
+            return result;
+        } catch (error) {
+            console.error('Hybrid: RTMP start failed', error.message);
+            return { error: error.message };
+        }
+    }
+
+    // Create RTMP ingress via LiveKit (hybrid mode)
+    // External RTMP streams (OBS) publish into the room
+    async hybridCreateIngress(participantIdentity, participantName) {
+        if (!this.isHybrid) return { error: 'Not in hybrid mode' };
+        try {
+            const result = await this.socket.request('hybridCreateIngress', {
+                room_id: this.room_id,
+                participantIdentity,
+                participantName: participantName || participantIdentity,
+            });
+            console.log('Hybrid: RTMP ingress created via LiveKit', result);
+            return result;
+        } catch (error) {
+            console.error('Hybrid: ingress creation failed', error.message);
+            return { error: error.message };
         }
     }
 

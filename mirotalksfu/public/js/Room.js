@@ -1188,9 +1188,12 @@ async function whoAreYou() {
         }
 
         // Capture media engine type from server config
+        // 'mediasoup' = standard, 'livekit' = LiveKit-only, 'hybrid' = both in parallel
         window._streamliveEngine = response.data.engine || 'mediasoup';
         window._streamliveLiveKitHost = response.data.livekitHost || '';
-        console.log('04 ----> Media engine:', window._streamliveEngine);
+        window._streamliveLiveKitEnabled = response.data.livekitEnabled || false;
+        console.log('04 ----> Media engine:', window._streamliveEngine,
+            window._streamliveEngine === 'hybrid' ? '(Mediasoup media + LiveKit services)' : '');
     } catch (error) {
         console.error('04 ----> AXIOS GET CONFIG ERROR', error.message);
     }

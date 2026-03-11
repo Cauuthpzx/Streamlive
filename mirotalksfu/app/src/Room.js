@@ -12,9 +12,15 @@ const log = new Logger('Room');
 
 const { audioLevelObserverEnabled, activeSpeakerObserverEnabled } = config.mediasoup.router;
 
-// Engine selection: 'mediasoup' (default) or 'livekit'
+// Engine selection: 'mediasoup' (default), 'livekit', or 'hybrid'
 const livekitConfig = config.livekit || {};
-const mediaEngine = livekitConfig.enabled && livekitConfig.engine === 'livekit' ? 'livekit' : 'mediasoup';
+const mediaEngine = livekitConfig.enabled
+    ? livekitConfig.engine === 'livekit'
+        ? 'livekit'
+        : livekitConfig.engine === 'hybrid'
+          ? 'hybrid'
+          : 'mediasoup'
+    : 'mediasoup';
 
 module.exports = class Room {
     constructor(room_id, worker, io) {
@@ -101,8 +107,9 @@ module.exports = class Room {
     toJson() {
         return {
             id: this.id,
-            engine: mediaEngine, // 'mediasoup' or 'livekit' — tells client which SDK to use
-            livekitHost: mediaEngine === 'livekit' ? livekitConfig.host : undefined,
+            engine: mediaEngine, // 'mediasoup', 'livekit', or 'hybrid'
+            livekitEnabled: livekitConfig.enabled || false,
+            livekitHost: mediaEngine !== 'mediasoup' ? livekitConfig.host : undefined,
             broadcasting: this._isBroadcasting,
             recording: this.recording,
             config: {

@@ -383,8 +383,13 @@ let nextMediasoupWorkerIdx = 0;
 
 // LiveKit integration
 const liveKitClient = new LiveKitClient(config?.livekit);
+const livekitEngine = config?.livekit?.engine || 'mediasoup';
 if (liveKitClient.isEnabled()) {
-    log.info('LiveKit integration enabled', { host: config.livekit.host });
+    log.info('LiveKit integration enabled', {
+        host: config.livekit.host,
+        engine: livekitEngine,
+        hybrid: livekitEngine === 'hybrid',
+    });
 }
 
 // Autodetect announcedAddress with multiple fallback services
@@ -627,11 +632,18 @@ function startServer() {
     // UI buttons configuration
     app.get('/config', (req, res) => {
         const livekitCfg = config.livekit || {};
-        const engine = livekitCfg.enabled && livekitCfg.engine === 'livekit' ? 'livekit' : 'mediasoup';
+        let engine = 'mediasoup';
+        if (livekitCfg.enabled) {
+            if (livekitCfg.engine === 'livekit') engine = 'livekit';
+            else if (livekitCfg.engine === 'hybrid') engine = 'hybrid';
+        }
         res.status(200).json({
             message: config?.ui?.buttons || false,
             engine: engine,
-            livekitHost: engine === 'livekit' ? livekitCfg.host : undefined,
+            // In hybrid mode, LiveKit is available for services (recording, ingress, RTMP)
+            // but Mediasoup handles primary WebRTC media
+            livekitEnabled: livekitCfg.enabled || false,
+            livekitHost: engine !== 'mediasoup' ? livekitCfg.host : undefined,
         });
     });
 
@@ -1912,6 +1924,103 @@ function startServer() {
             } catch (error) {
                 log.error('livekitStartRtmp error', error.message);
                 callback({ error: error.message });
+            }
+        });
+
+        // ####################################################
+        // HYBRID MODE: LiveKit services for Mediasoup rooms
+        // ####################################################
+        // In hybrid mode, Mediasoup handles WebRTC media while LiveKit
+        // provides server-side recording (Egress), RTMP ingress/egress,
+        // and horizontal scaling. These handlers let Mediasoup-connected
+        // clients use LiveKit services transparently.
+
+        socket.on('hybridStartRecording', async (data, callback) => {
+            if (livekitEngine !== 'hybrid') {
+                return callback({ error: 'Hybrid mode not enabled' });
+            }
+            try {
+                const { room_id, layout } = data;
+                log.info('Hybrid: starting LiveKit Egress recording for Mediasoup room', { room_id });
+                const egress = await liveKitClient.startRoomCompositeRecording(room_id, { layout });
+                callback({ success: true, egressId: egress.egressId, engine: 'livekit-egress' });
+            } catch (error) {
+                log.error('hybridStartRecording error', error.message);
+                callback({ error: error.message });
+            }
+        });
+
+        socket.on('hybridStopRecording', async (data, callback) => {
+            if (livekitEngine !== 'hybrid') {
+                return callback({ error: 'Hybrid mode not enabled' });
+            }
+            try {
+                const { egressId, room_id } = data;
+                log.info('Hybrid: stopping LiveKit Egress recording', { egressId, room_id });
+                if (egressId) {
+                    await liveKitClient.stopEgress(egressId);
+                } else if (room_id) {
+                    await liveKitClient.stopAllEgress(room_id);
+                }
+                callback({ success: true });
+            } catch (error) {
+                log.error('hybridStopRecording error', error.message);
+                callback({ error: error.message });
+            }
+        });
+
+        socket.on('hybridStartRtmp', async (data, callback) => {
+            if (livekitEngine !== 'hybrid') {
+                return callback({ error: 'Hybrid mode not enabled' });
+            }
+            try {
+                const { room_id, rtmpUrl, layout } = data;
+                log.info('Hybrid: starting LiveKit RTMP stream for Mediasoup room', { room_id, rtmpUrl });
+                const egress = await liveKitClient.startRtmpStream(room_id, rtmpUrl, { layout });
+                callback({ success: true, egressId: egress.egressId, engine: 'livekit-egress' });
+            } catch (error) {
+                log.error('hybridStartRtmp error', error.message);
+                callback({ error: error.message });
+            }
+        });
+
+        socket.on('hybridCreateIngress', async (data, callback) => {
+            if (livekitEngine !== 'hybrid') {
+                return callback({ error: 'Hybrid mode not enabled' });
+            }
+            try {
+                const { room_id, participantIdentity, participantName } = data;
+                log.info('Hybrid: creating LiveKit RTMP ingress for Mediasoup room', { room_id });
+                const ingress = await liveKitClient.createRtmpIngress(room_id, participantName || participantIdentity, {
+                    participantIdentity,
+                });
+                callback({ success: true, ingress, engine: 'livekit-ingress' });
+            } catch (error) {
+                log.error('hybridCreateIngress error', error.message);
+                callback({ error: error.message });
+            }
+        });
+
+        socket.on('hybridGetStatus', async (data, callback) => {
+            if (livekitEngine !== 'hybrid') {
+                return callback({ enabled: false });
+            }
+            try {
+                const health = await liveKitClient.getHealthStatus();
+                callback({
+                    enabled: true,
+                    engine: 'hybrid',
+                    livekitConnected: health.connected,
+                    livekitRooms: health.rooms || 0,
+                    services: {
+                        egress: true,
+                        ingress: true,
+                        rtmpOut: true,
+                        recording: true,
+                    },
+                });
+            } catch (error) {
+                callback({ enabled: true, engine: 'hybrid', livekitConnected: false, error: error.message });
             }
         });
     }
