@@ -96,6 +96,7 @@ const Host = require('./Host');
 const Room = require('./Room');
 const Peer = require('./Peer');
 const ServerApi = require('./ServerApi');
+const LiveKitClient = require('./LiveKitClient');
 const Logger = require('./Logger');
 const Validator = require('./Validator');
 const HtmlInjector = require('./HtmlInjector');
@@ -374,6 +375,12 @@ let announcedAddress = webRtcServerActive
 // All mediasoup workers
 const workers = [];
 let nextMediasoupWorkerIdx = 0;
+
+// LiveKit integration
+const liveKitClient = new LiveKitClient(config?.livekit);
+if (liveKitClient.isEnabled()) {
+    log.info('LiveKit integration enabled', { host: config.livekit.host });
+}
 
 // Autodetect announcedAddress with multiple fallback services
 if (!announcedAddress && IP === '0.0.0.0') {
@@ -1522,6 +1529,383 @@ function startServer() {
     });
 
     // ####################################################
+    // LIVEKIT API
+    // ####################################################
+
+    // LiveKit token endpoint - generates access tokens for clients
+    app.post(restApi.basePath + '/livekit/token', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        const { host, authorization } = req.headers;
+        const api = new ServerApi(host, authorization);
+        if (!api.isAuthorized()) {
+            return res.status(403).json({ error: 'Unauthorized!' });
+        }
+
+        try {
+            const { room, identity, name, canPublish, canSubscribe, metadata } = req.body;
+            if (!room || !identity) {
+                return res.status(400).json({ error: 'room and identity are required' });
+            }
+
+            const token = await liveKitClient.generateToken(room, identity, {
+                name: name || identity,
+                canPublish: canPublish !== false,
+                canSubscribe: canSubscribe !== false,
+                metadata,
+            });
+
+            res.json({
+                token,
+                livekitHost: config.livekit.host,
+                room,
+                identity,
+            });
+        } catch (error) {
+            log.error('LiveKit token error', error.message);
+            res.status(500).json({ error: 'Failed to generate LiveKit token' });
+        }
+    });
+
+    // LiveKit room token for Socket.io clients (no API key needed, uses room auth)
+    app.post(restApi.basePath + '/livekit/room-token', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        try {
+            const { room, peer_name, peer_uuid } = req.body;
+            if (!room || !peer_name) {
+                return res.status(400).json({ error: 'room and peer_name are required' });
+            }
+
+            const identity = peer_uuid || peer_name;
+            const metadata = JSON.stringify({ peer_name, source: 'streamlive' });
+
+            const token = await liveKitClient.generateToken(room, identity, {
+                name: peer_name,
+                metadata,
+            });
+
+            res.json({
+                token,
+                livekitHost: config.livekit.host,
+                room,
+            });
+        } catch (error) {
+            log.error('LiveKit room-token error', error.message);
+            res.status(500).json({ error: 'Failed to generate LiveKit room token' });
+        }
+    });
+
+    // LiveKit rooms list
+    app.get(restApi.basePath + '/livekit/rooms', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        const { host, authorization } = req.headers;
+        const api = new ServerApi(host, authorization);
+        if (!api.isAuthorized()) {
+            return res.status(403).json({ error: 'Unauthorized!' });
+        }
+
+        try {
+            const rooms = await liveKitClient.listRooms();
+            res.json({ rooms });
+        } catch (error) {
+            log.error('LiveKit rooms error', error.message);
+            res.status(500).json({ error: 'Failed to list LiveKit rooms' });
+        }
+    });
+
+    // LiveKit room stats
+    app.get(restApi.basePath + '/livekit/room/:roomName', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        const { host, authorization } = req.headers;
+        const api = new ServerApi(host, authorization);
+        if (!api.isAuthorized()) {
+            return res.status(403).json({ error: 'Unauthorized!' });
+        }
+
+        try {
+            const stats = await liveKitClient.getRoomStats(req.params.roomName);
+            if (!stats) {
+                return res.status(404).json({ error: 'Room not found' });
+            }
+            res.json(stats);
+        } catch (error) {
+            log.error('LiveKit room stats error', error.message);
+            res.status(500).json({ error: 'Failed to get room stats' });
+        }
+    });
+
+    // LiveKit start recording
+    app.post(restApi.basePath + '/livekit/recording/start', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        const { host, authorization } = req.headers;
+        const api = new ServerApi(host, authorization);
+        if (!api.isAuthorized()) {
+            return res.status(403).json({ error: 'Unauthorized!' });
+        }
+
+        try {
+            const { room, layout, filepath, fileType } = req.body;
+            if (!room) return res.status(400).json({ error: 'room is required' });
+
+            const egress = await liveKitClient.startRoomCompositeRecording(room, {
+                layout,
+                filepath,
+                fileType,
+            });
+            res.json({ success: true, egressId: egress.egressId });
+        } catch (error) {
+            log.error('LiveKit recording start error', error.message);
+            res.status(500).json({ error: 'Failed to start recording' });
+        }
+    });
+
+    // LiveKit stop recording
+    app.post(restApi.basePath + '/livekit/recording/stop', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        const { host, authorization } = req.headers;
+        const api = new ServerApi(host, authorization);
+        if (!api.isAuthorized()) {
+            return res.status(403).json({ error: 'Unauthorized!' });
+        }
+
+        try {
+            const { egressId, room } = req.body;
+            if (egressId) {
+                await liveKitClient.stopEgress(egressId);
+            } else if (room) {
+                await liveKitClient.stopAllEgress(room);
+            } else {
+                return res.status(400).json({ error: 'egressId or room is required' });
+            }
+            res.json({ success: true });
+        } catch (error) {
+            log.error('LiveKit recording stop error', error.message);
+            res.status(500).json({ error: 'Failed to stop recording' });
+        }
+    });
+
+    // LiveKit start RTMP streaming
+    app.post(restApi.basePath + '/livekit/rtmp/start', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        const { host, authorization } = req.headers;
+        const api = new ServerApi(host, authorization);
+        if (!api.isAuthorized()) {
+            return res.status(403).json({ error: 'Unauthorized!' });
+        }
+
+        try {
+            const { room, rtmpUrl, layout } = req.body;
+            if (!room || !rtmpUrl) return res.status(400).json({ error: 'room and rtmpUrl are required' });
+
+            const egress = await liveKitClient.startRtmpStream(room, rtmpUrl, { layout });
+            res.json({ success: true, egressId: egress.egressId });
+        } catch (error) {
+            log.error('LiveKit RTMP start error', error.message);
+            res.status(500).json({ error: 'Failed to start RTMP stream' });
+        }
+    });
+
+    // LiveKit create RTMP ingress
+    app.post(restApi.basePath + '/livekit/ingress/create', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        const { host, authorization } = req.headers;
+        const api = new ServerApi(host, authorization);
+        if (!api.isAuthorized()) {
+            return res.status(403).json({ error: 'Unauthorized!' });
+        }
+
+        try {
+            const { room, participantName } = req.body;
+            if (!room || !participantName) {
+                return res.status(400).json({ error: 'room and participantName are required' });
+            }
+
+            const ingress = await liveKitClient.createRtmpIngress(room, participantName);
+            res.json({
+                success: true,
+                ingressId: ingress.ingressId,
+                url: ingress.url,
+                streamKey: ingress.streamKey,
+            });
+        } catch (error) {
+            log.error('LiveKit ingress create error', error.message);
+            res.status(500).json({ error: 'Failed to create RTMP ingress' });
+        }
+    });
+
+    // LiveKit webhook receiver
+    app.post(restApi.basePath + '/livekit/webhook', async (req, res) => {
+        if (!liveKitClient.isEnabled()) {
+            return res.status(404).json({ error: 'LiveKit is not enabled' });
+        }
+
+        try {
+            const event = liveKitClient.validateWebhook(
+                JSON.stringify(req.body),
+                req.headers['authorization']
+            );
+
+            if (!event) {
+                return res.status(401).json({ error: 'Invalid webhook signature' });
+            }
+
+            log.debug('LiveKit webhook event', { event: event.event, room: event.room?.name });
+
+            // Handle specific events
+            switch (event.event) {
+                case 'room_started':
+                    log.info('LiveKit room started', { room: event.room?.name });
+                    break;
+                case 'room_finished':
+                    log.info('LiveKit room finished', { room: event.room?.name });
+                    break;
+                case 'participant_joined':
+                    log.info('LiveKit participant joined', {
+                        room: event.room?.name,
+                        participant: event.participant?.identity,
+                    });
+                    break;
+                case 'participant_left':
+                    log.info('LiveKit participant left', {
+                        room: event.room?.name,
+                        participant: event.participant?.identity,
+                    });
+                    break;
+                case 'track_published':
+                    log.debug('LiveKit track published', {
+                        room: event.room?.name,
+                        participant: event.participant?.identity,
+                    });
+                    break;
+                case 'egress_started':
+                    log.info('LiveKit egress started', { egressId: event.egressInfo?.egressId });
+                    break;
+                case 'egress_ended':
+                    log.info('LiveKit egress ended', { egressId: event.egressInfo?.egressId });
+                    break;
+            }
+
+            res.status(200).json({ received: true });
+        } catch (error) {
+            log.error('LiveKit webhook error', error.message);
+            res.status(500).json({ error: 'Webhook processing error' });
+        }
+    });
+
+    // LiveKit health check
+    app.get(restApi.basePath + '/livekit/health', async (req, res) => {
+        try {
+            const status = await liveKitClient.getHealthStatus();
+            res.json(status);
+        } catch (error) {
+            res.status(500).json({ error: error.message });
+        }
+    });
+
+    // ####################################################
+    // LIVEKIT SOCKET.IO INTEGRATION
+    // ####################################################
+
+    // Add LiveKit token generation via Socket.io for existing clients
+    // This allows the existing RoomClient to request LiveKit tokens
+    // after joining via the normal Socket.io flow
+
+    function setupLiveKitSocketEvents(socket) {
+        if (!liveKitClient.isEnabled()) return;
+
+        socket.on('getLiveKitToken', async (data, callback) => {
+            try {
+                const { room_id, peer_name, peer_uuid } = data;
+                if (!room_id || !peer_name) {
+                    return callback({ error: 'room_id and peer_name are required' });
+                }
+
+                const identity = peer_uuid || `${peer_name}_${socket.id}`;
+                const metadata = JSON.stringify({
+                    peer_name,
+                    socket_id: socket.id,
+                    source: 'streamlive',
+                });
+
+                const token = await liveKitClient.generateToken(room_id, identity, {
+                    name: peer_name,
+                    metadata,
+                });
+
+                callback({
+                    token,
+                    livekitHost: config.livekit.host,
+                    room: room_id,
+                    identity,
+                });
+            } catch (error) {
+                log.error('getLiveKitToken error', error.message);
+                callback({ error: 'Failed to generate LiveKit token' });
+            }
+        });
+
+        socket.on('livekitStartRecording', async (data, callback) => {
+            try {
+                const { room_id, layout } = data;
+                const egress = await liveKitClient.startRoomCompositeRecording(room_id, { layout });
+                callback({ success: true, egressId: egress.egressId });
+            } catch (error) {
+                log.error('livekitStartRecording error', error.message);
+                callback({ error: error.message });
+            }
+        });
+
+        socket.on('livekitStopRecording', async (data, callback) => {
+            try {
+                const { egressId, room_id } = data;
+                if (egressId) {
+                    await liveKitClient.stopEgress(egressId);
+                } else if (room_id) {
+                    await liveKitClient.stopAllEgress(room_id);
+                }
+                callback({ success: true });
+            } catch (error) {
+                log.error('livekitStopRecording error', error.message);
+                callback({ error: error.message });
+            }
+        });
+
+        socket.on('livekitStartRtmp', async (data, callback) => {
+            try {
+                const { room_id, rtmpUrl, layout } = data;
+                const egress = await liveKitClient.startRtmpStream(room_id, rtmpUrl, { layout });
+                callback({ success: true, egressId: egress.egressId });
+            } catch (error) {
+                log.error('livekitStartRtmp error', error.message);
+                callback({ error: error.message });
+            }
+        });
+    }
+
+    // ####################################################
     // SLACK API
     // ####################################################
 
@@ -1864,6 +2248,9 @@ function startServer() {
                 log.error('Error handling socket error', error.message);
             }
         });
+
+        // Setup LiveKit socket events for this connection
+        setupLiveKitSocketEvents(socket);
 
         socket.on('createRoom', async ({ room_id }, callback) => {
             socket.room_id = room_id;

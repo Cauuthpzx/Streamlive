@@ -1438,6 +1438,63 @@ module.exports = {
      * WebRTC servers, and transports. These settings control how the SFU
      * (Selective Forwarding Unit) handles media processing and networking.
      */
+
+    // ==============================================
+    // 10. LiveKit Integration (Optional)
+    // ==============================================
+
+    /**
+     * LiveKit Configuration
+     * ---------------------
+     * LiveKit is an open-source WebRTC SFU (written in Go) that can be used
+     * as an alternative/complementary media engine alongside Mediasoup.
+     *
+     * When enabled, LiveKit provides:
+     * - Built-in adaptive bitrate & simulcast
+     * - Server-side recording via Egress API
+     * - RTMP streaming (in/out) via Egress/Ingress APIs
+     * - Scalable multi-node architecture
+     * - E2E encryption support
+     * - Active speaker detection
+     *
+     * Setup:
+     * 1. Install LiveKit server: https://docs.livekit.io/realtime/self-hosting/
+     * 2. Set LIVEKIT_ENABLED=true in .env
+     * 3. Configure LIVEKIT_HOST, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
+     *
+     * Architecture:
+     * - Socket.io handles signaling, chat, commands, room management
+     * - LiveKit handles all WebRTC media transport (audio/video/screen)
+     * - Both engines can coexist - rooms can use either Mediasoup or LiveKit
+     *
+     * API Endpoints (when enabled):
+     * - POST /api/v1/livekit/token        - Generate access token
+     * - POST /api/v1/livekit/room-token   - Generate room token (for existing clients)
+     * - GET  /api/v1/livekit/rooms        - List active LiveKit rooms
+     * - GET  /api/v1/livekit/room/:name   - Get room stats
+     * - POST /api/v1/livekit/recording/*  - Start/stop recording
+     * - POST /api/v1/livekit/rtmp/*       - Start RTMP streaming
+     * - POST /api/v1/livekit/ingress/*    - Create RTMP ingress
+     * - POST /api/v1/livekit/webhook      - Receive LiveKit webhooks
+     * - GET  /api/v1/livekit/health       - Health check
+     */
+    livekit: {
+        // Enable LiveKit integration (default: false)
+        enabled: process.env.LIVEKIT_ENABLED === 'true' || false,
+
+        // LiveKit server WebSocket URL
+        // For local development: ws://localhost:7880
+        // For production: wss://your-livekit-server.com
+        host: process.env.LIVEKIT_HOST || 'ws://localhost:7880',
+
+        // LiveKit HTTP API URL (auto-derived from host if not set)
+        httpHost: process.env.LIVEKIT_HTTP_HOST || '',
+
+        // LiveKit API credentials (generated when setting up LiveKit server)
+        apiKey: process.env.LIVEKIT_API_KEY || '',
+        apiSecret: process.env.LIVEKIT_API_SECRET || '',
+    },
+
     mediasoup: {
         /**
          * Worker Configuration

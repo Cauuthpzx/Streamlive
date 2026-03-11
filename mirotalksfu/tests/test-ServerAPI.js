@@ -212,7 +212,7 @@ describe('test-ServerAPI', () => {
 
     describe('getToken', () => {
         it('should return an encrypted JWT token', () => {
-            const tokenData = { username: 'user', password: 'pass', presenter: true, expire: '1h' };
+            const tokenData = { username: 'user', presenter: true, expire: '1h' };
             const signStub = sinon.stub(jwt, 'sign').returns('jwtToken');
             const encryptStub = sinon.stub(CryptoJS.AES, 'encrypt').returns({ toString: () => 'encryptedPayload' });
 
@@ -224,7 +224,7 @@ describe('test-ServerAPI', () => {
                 .should.be.true();
             encryptStub
                 .calledWith(
-                    JSON.stringify({ username: 'user', password: 'pass', presenter: 'true' }),
+                    JSON.stringify({ username: 'user', presenter: 'true' }),
                     'mirotalksfu_jwt_secret'
                 )
                 .should.be.true();
@@ -269,7 +269,7 @@ describe('test-ServerAPI', () => {
             roomList.has('room1').should.be.false();
         });
 
-        it('should pass redirect URL to peers when provided', () => {
+        it('should pass safe redirect path to peers when provided', () => {
             const removePeerStub = sinon.stub();
             const sendToAllStub = sinon.stub();
             const roomList = new Map([
@@ -283,7 +283,8 @@ describe('test-ServerAPI', () => {
                 ],
             ]);
 
-            const result = serverApi.endMeeting(roomList, 'room1', 'https://example.com/goodbye');
+            // Only relative paths are allowed (open redirect prevention)
+            const result = serverApi.endMeeting(roomList, 'room1', '/goodbye');
 
             result.should.deepEqual({ success: true, message: 'Meeting ended', room: 'room1' });
             sendToAllStub
@@ -291,11 +292,37 @@ describe('test-ServerAPI', () => {
                     type: 'ejectAll',
                     peer_name: 'API',
                     broadcast: true,
-                    redirect: 'https://example.com/goodbye',
+                    redirect: '/goodbye',
                 })
                 .should.be.true();
             removePeerStub.calledOnce.should.be.true();
             roomList.has('room1').should.be.false();
+        });
+
+        it('should block external redirect URLs (open redirect prevention)', () => {
+            const sendToAllStub = sinon.stub();
+            const roomList = new Map([
+                [
+                    'room1',
+                    {
+                        getPeers: () => new Map([['peer1', {}]]),
+                        removePeer: sinon.stub(),
+                        sendToAll: sendToAllStub,
+                    },
+                ],
+            ]);
+
+            serverApi.endMeeting(roomList, 'room1', 'https://evil.com/phishing');
+
+            // External URLs should be sanitized to empty string
+            sendToAllStub
+                .calledWith('cmd', {
+                    type: 'ejectAll',
+                    peer_name: 'API',
+                    broadcast: true,
+                    redirect: '',
+                })
+                .should.be.true();
         });
 
         it('should use empty redirect when redirect is not provided', () => {

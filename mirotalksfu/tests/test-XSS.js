@@ -32,7 +32,7 @@ describe('test-XSS', () => {
             const complexString = '<svg><g/onload=alert(2)//<p>';
             const sanitizedString = checkXSS(complexString);
             sanitizedString.should.not.containEql('onload');
-            sanitizedString.should.equal('<svg><g></g></svg>');
+            sanitizedString.should.not.containEql('svg'); // SVG tags stripped for security
         });
 
         it('should sanitize HTML attributes', () => {
@@ -100,7 +100,7 @@ describe('test-XSS', () => {
             sanitizedData.key1[0].should.not.containEql('alert');
             sanitizedData.key1[0].should.not.containEql('</script>');
             sanitizedData.key1[1].key2.should.not.containEql('onerror');
-            sanitizedData.key1[1].key2.should.equal('<img src="x">');
+            sanitizedData.key1[1].key2.should.equal('<img>'); // src="x" stripped (not https/mailto)
         });
 
         it('should handle XSS in nested HTML elements', () => {
@@ -125,7 +125,7 @@ describe('test-XSS', () => {
             const maliciousJson = '{"key": "<img src=\'x\' onerror=\'alert(1)\'>"}';
             const sanitizedJson = checkXSS(JSON.parse(maliciousJson));
             sanitizedJson.key.should.not.containEql('onerror');
-            sanitizedJson.key.should.equal('<img src="x">');
+            sanitizedJson.key.should.equal('<img>'); // src="x" stripped (not https/mailto)
         });
 
         it('should sanitize base64 encoded content', () => {
@@ -146,7 +146,7 @@ describe('test-XSS', () => {
             const obfuscatedXss = '<img src="x" onerror="eval(String.fromCharCode(97,108,101,114,116) + \'(1)\')">';
             const sanitizedObfuscatedXss = checkXSS(obfuscatedXss);
             sanitizedObfuscatedXss.should.not.containEql('eval');
-            sanitizedObfuscatedXss.should.equal('<img src="x">');
+            sanitizedObfuscatedXss.should.equal('<img>'); // src="x" stripped (not https/mailto)
         });
     });
 
@@ -178,7 +178,7 @@ describe('test-XSS', () => {
             const svgXss = '<svg><script>alert("xss")</script></svg>';
             const sanitizedSvgXss = checkXSS(svgXss);
             sanitizedSvgXss.should.not.containEql('<script>');
-            sanitizedSvgXss.should.equal('<svg></svg>');
+            sanitizedSvgXss.should.not.containEql('svg'); // SVG tags stripped for security
         });
 
         it('should sanitize data URIs in HTML attributes', () => {
