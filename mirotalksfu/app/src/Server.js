@@ -1182,10 +1182,17 @@ function startServer() {
         const expectedApiSecret = rtmpCfg && rtmpCfg.apiSecret;
         const apiSecret = req.headers.authorization;
 
-        if (!apiSecret || apiSecret !== expectedApiSecret) {
+        const crypto_node = require('crypto');
+        const isValid =
+            apiSecret &&
+            expectedApiSecret &&
+            Buffer.from(String(apiSecret)).length === Buffer.from(String(expectedApiSecret)).length &&
+            crypto_node.timingSafeEqual(Buffer.from(String(apiSecret)), Buffer.from(String(expectedApiSecret)));
+
+        if (!isValid) {
             log.warn('RTMP apiSecret Unauthorized', {
-                apiSecret: apiSecret,
-                expectedApiSecret: expectedApiSecret,
+                apiSecretProvided: !!apiSecret,
+                expectedApiSecretConfigured: !!expectedApiSecret,
             });
             return res.status(401).send('Unauthorized');
         }

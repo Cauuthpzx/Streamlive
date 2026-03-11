@@ -34,10 +34,20 @@ function hasPathTraversal(input) {
     }
 
     let decodedInput = input;
-    try {
-        decodedInput = decodeURIComponent(input);
-        decodedInput = decodeURIComponent(decodedInput);
-    } catch (err) {}
+    // Decode in a loop until stable (handles multi-level encoding)
+    for (let i = 0; i < 5; i++) {
+        try {
+            const decoded = decodeURIComponent(decodedInput);
+            if (decoded === decodedInput) break;
+            decodedInput = decoded;
+        } catch (err) {
+            break;
+        }
+    }
+    // Reject any input that still contains % after decoding (potential bypass)
+    if (/%[0-9A-Fa-f]{2}/.test(decodedInput) && decodedInput !== input) {
+        return true;
+    }
 
     const pathTraversalPattern = /(\.\.(\/|\\))+/;
     const excessiveDotsPattern = /(\.{4,}\/+|\.{4,}\\+)/;
@@ -57,6 +67,7 @@ function hasPathTraversal(input) {
 }
 
 function isValidEmail(email) {
+    if (!email || typeof email !== 'string' || email.length > 254) return false;
     const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
     return emailRegex.test(email);
 }

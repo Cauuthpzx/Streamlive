@@ -13,21 +13,20 @@ const log = new Logger('Xss');
 
 // Configure DOMPurify
 purify.setConfig({
-    ALLOWED_TAGS: ['a', 'img', 'div', 'span', 'svg', 'g', 'p'], // Allow specific tags
+    ALLOWED_TAGS: ['a', 'img', 'div', 'span', 'p'], // Allow specific tags (no SVG - XSS vector)
     ALLOWED_ATTR: ['href', 'src', 'title', 'id', 'class', 'target', 'width', 'height'], // Allow specific attributes
-    ALLOWED_URI_REGEXP: /^(?!data:|javascript:|vbscript:|file:|view-source:).*/, // Disallow dangerous URIs
+    ALLOWED_URI_REGEXP: /^(https?|mailto):/i, // Only allow safe URI schemes
 });
 
 // Clean problematic attributes
 function cleanAttributes(node) {
     if (node.nodeType === window.Node.ELEMENT_NODE) {
-        // Remove dangerous attributes
-        const dangerousAttributes = ['onerror', 'onclick', 'onload', 'onmouseover', 'onfocus', 'onchange', 'oninput'];
-        dangerousAttributes.forEach((attr) => {
-            if (node.hasAttribute(attr)) {
+        // Remove ALL event handler attributes (on*)
+        for (const attr of Array.from(node.getAttributeNames())) {
+            if (attr.toLowerCase().startsWith('on')) {
                 node.removeAttribute(attr);
             }
-        });
+        }
 
         // Handle special cases for 'data:' URIs
         const src = node.getAttribute('src');
@@ -62,7 +61,11 @@ const checkXSS = (dataObject) => {
         return sanitizeData(dataObject);
     } catch (error) {
         log.error('Sanitization error:', error);
-        return dataObject; // Return original data in case of error
+        // Never return unsanitized data - return safe defaults
+        if (typeof dataObject === 'string') return '';
+        if (Array.isArray(dataObject)) return [];
+        if (dataObject && typeof dataObject === 'object') return {};
+        return null;
     }
 };
 

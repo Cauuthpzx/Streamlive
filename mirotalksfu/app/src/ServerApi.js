@@ -2,6 +2,7 @@
 
 const jwt = require('jsonwebtoken');
 const CryptoJS = require('crypto-js');
+const crypto = require('crypto');
 
 const config = require('./config');
 const { v4: uuidV4 } = require('uuid');
@@ -17,8 +18,11 @@ module.exports = class ServerApi {
     }
 
     isAuthorized() {
-        if (this._authorization != this._api_key_secret) return false;
-        return true;
+        if (!this._authorization || !this._api_key_secret) return false;
+        const a = Buffer.from(String(this._authorization));
+        const b = Buffer.from(String(this._api_key_secret));
+        if (a.length !== b.length) return false;
+        return crypto.timingSafeEqual(a, b);
     }
 
     getStats(roomList, timestamp = new Date().toISOString()) {
@@ -75,6 +79,15 @@ module.exports = class ServerApi {
             return { success: false, error: 'Room not found' };
         }
 
+        // Validate redirect to prevent open redirect attacks
+        let safeRedirect = '';
+        if (redirect) {
+            // Only allow relative paths (starting with /) and same-origin URLs
+            if (redirect.startsWith('/') && !redirect.startsWith('//')) {
+                safeRedirect = redirect;
+            }
+        }
+
         const roomObj = roomList.get(room);
 
         // Notify all peers to exit (clients handle 'ejectAll' by redirecting)
@@ -82,7 +95,7 @@ module.exports = class ServerApi {
             type: 'ejectAll',
             peer_name: 'API',
             broadcast: true,
-            redirect: redirect || '',
+            redirect: safeRedirect,
         });
 
         // Remove all peers and close transports
@@ -122,8 +135,8 @@ module.exports = class ServerApi {
             'https://' +
             this._host +
             '/join?' +
-            `room=${roomValue}` +
-            `&roomPassword=${roomPasswordValue}` +
+            `room=${encodeURIComponent(roomValue)}` +
+            `&roomPassword=${encodeURIComponent(roomPasswordValue)}` +
             `&name=${encodeURIComponent(nameValue)}` +
             `&avatar=${encodeURIComponent(avatarValue)}` +
             `&audio=${audioValue}` +
@@ -141,14 +154,13 @@ module.exports = class ServerApi {
     getToken(token) {
         if (!token) return '';
 
-        const { username = 'username', password = 'password', presenter = false, expire } = token;
+        const { username = 'username', presenter = false, expire } = token;
 
         const expireValue = expire || JWT_EXP;
 
-        // Constructing payload
+        // Constructing payload (never include passwords in tokens)
         const payload = {
             username: String(username),
-            password: String(password),
             presenter: String(presenter),
         };
 
@@ -163,6 +175,6 @@ module.exports = class ServerApi {
     }
 
     getRandomNumber() {
-        return Math.floor(Math.random() * 999999);
+        return crypto.randomInt(0, 999999);
     }
 };

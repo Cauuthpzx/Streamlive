@@ -11,7 +11,9 @@ module.exports = class Host {
      * @returns string IP
      */
     getIP(req) {
-        return req.headers['x-forwarded-for'] || req.headers['X-Forwarded-For'] || req.socket.remoteAddress || req.ip;
+        // Note: X-Forwarded-For should only be trusted when behind a proxy.
+        // The caller (Server.js getIP) handles this check.
+        return req.socket.remoteAddress || req.ip;
     }
 
     /**
